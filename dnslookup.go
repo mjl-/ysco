@@ -19,9 +19,9 @@ type Toolchains struct {
 	Cur       string
 	Prev      string
 	Next      string
-	CurFound  time.Time `json:",omitempty"`
-	PrevFound time.Time `json:",omitempty"`
-	NextFound time.Time `json:",omitempty"`
+	CurFound  time.Time
+	PrevFound time.Time
+	NextFound time.Time
 }
 
 // Version is a parsed module version as returned by a gopherwatch v0 DNS TXT record.
@@ -29,7 +29,7 @@ type Version struct {
 	Full                string
 	Major, Minor, Patch int
 	Pre                 string
-	Found               time.Time `json:",omitempty"`
+	Found               time.Time
 }
 
 // ErrNotFound is returned by LookupToolchains and LookupModule when the module
