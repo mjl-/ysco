@@ -1,0 +1,184 @@
+<!doctype html>
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<title>Ysco - {{ .SvcModPath }} {{ .SvcPkgDir }} {{ .SvcVersion }} {{ .SvcGoVersion }}</title>
+		<style>
+* { font-family: sans-serif; margin: 0; padding: 0; font-size: 1em; }
+body { padding: 1em; }
+h1, h2 { margin-top: 2ex; margin-bottom: 1ex; }
+h1 { font-size: 1.4em; }
+h2 { font-size: 1.2em; }
+h3 { font-size: 1em; }
+ul { padding-left: 1em; }
+p { margin-bottom: 1ex; }
+th, td { padding: .2em .1em; }
+		</style>
+	</head>
+	<body>
+		<h1 style="margin-top: 0">Ysco - Managed automated updates</h1>
+
+		<form method="POST">
+			<input type="hidden" name="command" value="check" />
+			<button>Check for updates</button>
+		</form>
+
+		<h2>Scheduled updates</h2>
+	{{ if .PauseReason }}
+		<p>Note: Updates are paused until manual intervention: {{ .PauseReason }}</p>
+	{{ end }}
+	{{ if .Scheduled }}
+		<p>According to policy, time of discovery and update schedule:</p>
+		<table>
+			<thead>
+				<tr>
+					<th>Which</th>
+					<th>Package path</th>
+					<th>Version</th>
+					<th>GoVersion</th>
+					<th>Time</th>
+					<th>Action</th>
+				</tr>
+			</thead>
+			<tbody>
+			{{ range $row := .Scheduled }}
+				<tr>
+					<td>{{ $row.Which }}</td>
+					<td>{{ $row.ModPath }} {{ $row.PkgDir }}</td>
+					<td>{{ $row.Version }}</td>
+					<td>{{ $row.GoVersion }}</td>
+					<td>{{ $row.Time }}</td>
+					<td>
+						<form method="POST">
+							<input type="hidden" name="command" value="update" />
+							<input type="hidden" name="version" value="{{ $row.Version }}" />
+							<input type="hidden" name="goversion" value="{{ $row.GoVersion }}" />
+							<input type="hidden" name="which" value="{{ $row.Which }}" />
+							<button>Update now</button>
+						</form>
+					</td>
+				</tr>
+			{{ end }}
+			</tbody>
+		</table>
+	{{ else }}
+		<p>No updates scheduled.</p>
+	{{ end }}
+
+		<h2>Available versions for service</h2>
+		<p>Current: {{ .SvcModPath }} {{ .SvcPkgDir }} {{ .SvcVersion }} {{ .SvcGoVersion }}</p>
+		<form method="POST">
+			<input type="hidden" name="command" value="update" />
+			<input type="hidden" name="which" value="svc" />
+			<div style="display: flex; gap: 1em">
+				<div>
+					<h3>Module</h3>
+				{{ if .SvcVersionsError }}
+					<p>Error looking up versions: {{ .SvcVersionsError }}</p>
+				{{ end }}
+					<ul>
+					{{ $curversion := .SvcVersion }}
+					{{ range $version := .SvcVersions }}
+						<li><label><input type="radio" name="version" value="{{ $version }}" {{ if eq $version $curversion }}checked{{ end }} /> {{ $version }}</label></li>
+					{{ end }}
+					</ul>
+				</div>
+
+				<div>
+					<h3>Go toolchains</h3>
+				{{ if .GoVersionsError }}
+					<p>Error looking up Go toolchain versions: {{ .GoVersionsError }}</p>
+				{{ end }}
+					<ul>
+					{{ $curgoversion := .SvcGoVersion }}
+					{{ range $goversion := .GoVersions }}
+						<li><label><input type="radio" name="goversion" value="{{ $goversion }}"  {{ if eq $goversion $curgoversion }}checked{{ end }} /> {{ $goversion }}</label></li>
+					{{ end }}
+					</ul>
+				</div>
+
+				<div>
+					<h3 style="visibility: hidden">Go toolchains</h3>
+					<button>Update now</button>
+				</div>
+			</div>
+		</form>
+
+		<form method="POST">
+			<input type="hidden" name="command" value="update" />
+			<input type="hidden" name="which" value="svc" />
+			<div style="margin-top: 2ex">
+				<label>Version <input name="version" value="{{ .SvcVersion }}" style="width: 10em" /></label>
+				<label>Go version <input name="goversion" value="{{ .SvcGoVersion }}" style="width: 10em" /></label>
+				<button>Update now</button>
+			</div>
+		</form>
+
+		<h2>Available versions for ysco</h2>
+		<p>Current: {{ .SelfModPath }} {{ .SelfPkgDir }} {{ .SelfVersion }} {{ .SelfGoVersion }}</p>
+		<form method="POST">
+			<input type="hidden" name="command" value="update" />
+			<input type="hidden" name="which" value="self" />
+			<div style="display: flex; gap: 1em">
+				<div>
+					<h3>Module</h3>
+				{{ if .SelfVersionsError }}
+					<p>Error looking up versions: {{ .SelfVersionsError }}</p>
+				{{ end }}
+					<ul>
+					{{ $curversion := .SelfVersion }}
+					{{ range $version := .SelfVersions }}
+						<li><label><input type="radio" name="version" value="{{ $version }}" {{ if eq $version $curversion }}checked{{ end }} /> {{ $version }}</label></li>
+					{{ end }}
+					</ul>
+				</div>
+
+				<div>
+					<h3>Go toolchains</h3>
+				{{ if .GoVersionsError }}
+					<p>Error looking up Go toolchain versions: {{ .GoVersionsError }}</p>
+				{{ end }}
+					<ul>
+					{{ $curgoversion := .SelfGoVersion }}
+					{{ range $goversion := .GoVersions }}
+						<li><label><input type="radio" name="goversion" value="{{ $goversion }}"  {{ if eq $goversion $curgoversion }}checked{{ end }} /> {{ $goversion }}</label></li>
+					{{ end }}
+					</ul>
+				</div>
+
+				<div>
+					<h3 style="visibility: hidden">Go toolchains</h3>
+					<button>Update now</button>
+				</div>
+			</div>
+		</form>
+
+		<form method="POST">
+			<input type="hidden" name="command" value="update" />
+			<input type="hidden" name="which" value="self" />
+			<div style="margin-top: 2ex">
+				<label>Version <input name="version" value="{{ .SelfVersion }}" style="width: 10em" /></label>
+				<label>Go version <input name="goversion" value="{{ .SelfGoVersion }}" style="width: 10em" /></label>
+				<button>Update now</button>
+			</div>
+		</form>
+
+		<h2>Old binaries</h2>
+	{{ if and (not .OldBinariesSelf) (not .OldBinariesSvc) }}
+		<p>No old binaries scheduled for cleanup.</p>
+	{{ else }}
+		<p>Binaries scheduled for cleanup after next successful update:</p>
+		<ul>
+		{{ range $path := .OldBinariesSelf }}
+			<li>{{ $path }}</li>
+		{{ end }}
+		{{ range $path := .OldBinariesSvc }}
+			<li>{{ $path }}</li>
+		{{ end }}
+		</ul>
+	{{ end }}
+
+		<h2>Configuration</h2>
+		<p>Started as: {{ .Argv }}</p>
+	</body>
+</html>

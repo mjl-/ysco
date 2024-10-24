@@ -1,0 +1,97 @@
+# For full end-to-end tests, we need a webserver to serve git repo's from, a go
+# proxy, a go sum database and a gobuild instance.
+
+# todo: could add a container with dns, and a container with gopherwatch, and do monitor requests through them (dns delegating to gopherwatch).
+
+version: '3.7'
+services:
+  # We run integration_test.go from this container. It starts ysco, then makes HTTP
+  # calls to make it update, let it discover new versions.
+  test:
+    image: ysco-golang-alpine-git:1.23.2-alpine
+    build: testdata/golang-alpine-git # The services below use the same image.
+    # note: runs as root, ysco starts its service as uid 1000
+    command: ["/testdata/test.sh"]
+    volumes:
+      - ./testdata:/testdata
+      - ./.git:/testdata/git
+    depends_on:
+      gobuild:
+        condition: service_healthy
+
+  git:
+    image: ysco-golang-alpine-git:1.23.2-alpine
+    # build: testdata/golang-alpine-git # Commented out because docker will try to build it again.
+    command: ["/testdata/git.sh"]
+    user: 1000:1000
+    volumes:
+      - ./testdata:/testdata
+      - ./.git:/testdata/git
+    ports:
+      - 1080:80
+      - 1443:443
+    hostname: git.local
+    networks:
+       default:
+          aliases:
+            - git.local
+    healthcheck:
+      test: netstat -nlt | grep ':443 '
+      interval: 2s
+      timeout: 1s
+      retries: 30
+
+  goproxy:
+    image: ysco-golang-alpine-git:1.23.2-alpine
+    # build: testdata/golang-alpine-git
+    command: ["/testdata/goproxy.sh"]
+    user: 1000:1000
+    volumes:
+      - ./testdata:/testdata
+    ports:
+      - 2080:2080
+    depends_on:
+      git:
+        condition: service_healthy
+    healthcheck:
+      test: netstat -nlt | grep ':2080 '
+      interval: 2s
+      timeout: 1s
+      retries: 30
+
+  xgosumdb:
+    image: ysco-golang-alpine-git:1.23.2-alpine
+    # build: testdata/golang-alpine-git
+    command: ["/testdata/xgosumdb.sh"]
+    user: 1000:1000
+    volumes:
+      - ./testdata:/testdata
+    ports:
+      - 3080:3080
+    depends_on:
+      goproxy:
+        condition: service_healthy
+    healthcheck:
+      test: netstat -nlt | grep ':3080 '
+      interval: 2s
+      timeout: 1s
+      retries: 30
+
+  gobuild:
+    image: ysco-golang-alpine-git:1.23.2-alpine
+    # build: testdata/golang-alpine-git
+    user: 1000:1000
+    command: ["/testdata/gobuild.sh"]
+    volumes:
+      - ./testdata:/testdata
+      - ./testdata/sdk:/testdata/sdk
+    ports:
+      - 4080:4080
+    depends_on:
+      xgosumdb:
+        condition: service_healthy
+    healthcheck:
+      test: netstat -nlt | grep ':4080 '
+      interval: 2s
+      timeout: 1s
+      retries: 30

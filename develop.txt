@@ -1,0 +1,5 @@
+# Testing
+
+Update functionality, including for self-exec updates, can be
+tested by running "make test-integration", using
+docker-compose.

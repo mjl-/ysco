@@ -1,0 +1,38 @@
+groups:
+- name: ysco
+  rules:
+
+  - alert: ysco-transparency-log-security-error
+    expr: ysco_tlog_security_errors_total > 0
+    labels:
+      page: always
+    annotations:
+      summary: security error in transparency log of gobuild (for downloading new binaries)
+
+  - alert: ysco-download-errors
+    expr: rate(ysco_download_errors_total[15m]) > 0
+    labels:
+      page: email
+    annotations:
+      summary: error downloading new binary while updating
+
+  - alert: ysco-update-rollback
+    expr: rate(ysco_service_update_rollback_total[15m]) > 0
+    labels:
+      page: email
+    annotations:
+      summary: error rolling back an update
+
+  - alert: ysco-update-errors
+    expr: rate(ysco_update_errors_total[15m]) > 0
+    labels:
+      page: email
+    annotations:
+      summary: automatic updates are paused after an update, manual intervention required
+
+  - alert: ysco-updates-paused
+    expr: ysco_updates_paused > 0
+    labels:
+      page: email
+    annotations:
+      summary: automatic updates are paused after an update, manual intervention required
