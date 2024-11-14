@@ -377,24 +377,25 @@ func run(args []string) {
 			log.Fatalf("-user requires running as root")
 		}
 
+		var uidstr string
 		u, err := user.Lookup(username)
 		var unknownUser user.UnknownUserError
 		if err != nil && !errors.As(err, &unknownUser) {
 			log.Fatalf("looking up user: %v", err)
-		} else if err != nil {
-			var uidstr string
+		}
+		if err != nil {
 			u, err = user.LookupId(username)
 			if err != nil {
 				uidstr = username
 			} else {
 				uidstr = u.Uid
 			}
-			id, err := strconv.ParseUint(uidstr, 10, 32)
-			if err != nil {
-				log.Fatalf("cannot find user %q, and cannot parse as uid", username)
-			}
-			userID = uint32(id)
+		} else {
+			uidstr = u.Uid
 		}
+		id, err := strconv.ParseUint(uidstr, 10, 32)
+		xcheckf(err, "finding user %q and parsing uid %q", username, uidstr)
+		userID = uint32(id)
 		if u != nil {
 			gid, err := strconv.ParseUint(u.Gid, 10, 32)
 			xcheckf(err, "parsing gid for user")
