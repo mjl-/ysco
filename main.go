@@ -583,8 +583,8 @@ func run(args []string) {
 		}
 
 		handler := http.NewServeMux()
-		handler.HandleFunc("GET /", handleIndexGet)
-		handler.HandleFunc("POST /", handleIndexPost)
+		handler.HandleFunc("GET /{$}", handleIndexGet)
+		handler.HandleFunc("POST /{$}", handleIndexPost)
 		handler.HandleFunc("GET /json", handleJSONGet)
 		handler.HandleFunc("POST /notify", handleNotify)
 		handler.HandleFunc("POST /notifytoolchain", handleNotifyToolchain)
