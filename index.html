@@ -47,7 +47,7 @@ th, td { padding: .2em .1em; }
 					<td>{{ $row.ModPath }} {{ $row.PkgDir }}</td>
 					<td>{{ $row.Version }}</td>
 					<td>{{ $row.GoVersion }}</td>
-					<td>{{ $row.Time }}</td>
+					<td>{{ $row.Time.Format "2006-01-02 15:04:05" }}</td>
 					<td>
 						<form method="POST">
 							<input type="hidden" name="command" value="update" />
