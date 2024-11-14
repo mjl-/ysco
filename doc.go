@@ -46,31 +46,32 @@ See ysco help output for its command-line flags.
 
 Ysco periodically checks for updates, both of the monitored service, and of
 ysco itself. By default, it will first look in GopherWatch.org DNS (low overhead,
-only return the latest version), and will fall back to querying the Go module
+only returns the latest version), and will fall back to querying the Go module
 proxy (higher overhead, returns all versions) in case of errors. The
 GopherWatch.org DNS is DNSSEC-protected, consider installing/using a
 DNSSEC-verifying resolver.
 
 # Downloading binaries
 
-Ysco automatically retrieves a binary for a module through the gobuild service.
-Gobuild will retrieve source code from the Go module proxy, verified through
-the Go sum database, and build a binary for any Go toolchain/OS/architecture.
-The hash of the binary is added to the gobuild transparency log (similar to the
-Go sum database), to build trust in its correct operation.
+Ysco automatically retrieves a binary through the gobuild service.  Gobuild
+retrieves source code from the Go module proxy, verified through the Go sum
+database, and build a binary for any Go toolchain/OS/architecture.  The hash of
+the binary is added to the gobuild transparency log (similar to the Go sum
+database), to build trust in its correct operation.
 
-The gobuild service only builds applications that can be cross-compiled
-deterministically (leading to the same bytes/hash) with only the Go toolchain,
-i.e. with CGO_ENABLED=0. Only binaries that include all require assets (with
-"embed") can be successfully installed.
+Gobuild only builds applications that can be cross-compiled deterministically
+(leading to the same bytes/hash) with only the Go toolchain, i.e. with
+CGO_ENABLED=0. Only binaries that include all required assets (with "embed")
+can be successfully installed.
 
 # Update policy
 
-When a new module version or toolchain is published and discovered by ysco,
-they are scheduled for installing if they match the configured policy.
+When a new module version or toolchain is published, discovered by ysco and
+matches the configured policy, an update is scheduled.
 
 For new module versions, by default only patch releases are automatically
-installed.
+installed. Ysco can also be configured to automatically update to new minor
+versions of modules.
 
 For new Go toolchains, by default new patch releases will cause an update to be
 installed. But if a new module version is published, the latest Go toolchain is
@@ -80,9 +81,6 @@ toolchain is no longer supported, an update using the latest "previous" Go
 toolchain is installed. This is the "follow" policy. The "supported" mode is
 similar, but does not update to the latest Go toolchain version when a new
 module version is discovered.
-
-Ysco can be configured to automatically update to new minor versions of
-modules.
 
 # Update schedule
 
@@ -117,7 +115,7 @@ module paths ending with /v<major> for versions >= 2).
 
 Ysco relies on the Go sum database to discover new versions. New module
 versions must be fetched through the Go module proxy once to get added to the
-Go sum database. A "go install <module>@latest" should be enough.
+Go sum database. Running "go install <module>@latest" should be enough.
 
 The GopherWatch DNS service currently only returns a single minor version for a
 module. If an application has multiple maintained minor versions, only new
