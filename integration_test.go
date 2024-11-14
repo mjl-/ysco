@@ -124,7 +124,7 @@ func TestIntegration(t *testing.T) {
 	tcheck(err, "check for updates")
 
 	getState()
-	tcompare(len(state.Scheduled), 1) // To v0.0.5 again.
+	tcompare(len(state.Scheduled), 2) // To v0.0.5 again, and new Go toolchain for ysco.
 
 	fmt.Println("# Waiting for rollback period to expire")
 	time.Sleep(6 * time.Second)
