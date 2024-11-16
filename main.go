@@ -1528,6 +1528,8 @@ func updateInstall(which Which, dr downloadResult, manual bool, respWriter http.
 	updating.svcinfoPrev = updating.svcinfo
 	updating.binaryPathPrev = prevPath
 	updating.svcinfo = dr.newinfo
+	metricSvcVersion.WithLabelValues(updating.svcinfo.Main.Version).Set(1)
+	metricSvcGoVersion.WithLabelValues(updating.svcinfo.GoVersion).Set(1)
 	p := updating.process
 	updating.Unlock()
 
@@ -1656,6 +1658,8 @@ func updateRollback() error {
 
 	updating.svcinfo = updating.svcinfoPrev
 	updating.svcinfoPrev = nil
+	metricSvcVersion.WithLabelValues(updating.svcinfo.Main.Version).Set(1)
+	metricSvcGoVersion.WithLabelValues(updating.svcinfo.GoVersion).Set(1)
 	updating.binaryPathPrev = ""
 	return nil
 }
