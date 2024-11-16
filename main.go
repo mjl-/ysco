@@ -83,9 +83,10 @@ var updateDelay time.Duration // Minimum time to wait between a new version was 
 var updateSchedule Schedule
 var updateJitter time.Duration // Random value between 0 and this value added to delay time before updating.
 var gobuildVerifier string     // Verifier key (and address) for gobuild transparency log.
+var addr string
 var adminAddr string
-var adminAuthFile string // Path to user/pass file.
 var metricsAddr string
+var adminAuthFile string // Path to user/pass file.
 var logLevel slog.LevelVar
 
 var cmdArgs []string // argv for starting service.
@@ -331,9 +332,10 @@ func run(args []string) {
 	flg.DurationVar(&updateDelay, "updatedelay", 24*time.Hour, "delay between finding module update and updating")
 	flg.TextVar(&updateSchedule, "updateschedule", &Schedule{}, "schedule during which updates can be done: semicolon separated tokens with days and/or hours, each comma-separated of which each a single or dash-separated range; hours from 0-23, days from su-sa; examples: 'mo-fr 9-16' for during work days, 'mo-fr 18-22; sa,su 9-18' for workday evenings and weekends; updates are scheduled in the first available hour, taking backoff and jitter into account")
 	flg.DurationVar(&updateJitter, "updatejitter", time.Hour, "maximum random delay within the scheduled hour to delay")
-	flg.StringVar(&adminAddr, "adminaddr", "", "address to serve admin webserver on if non-empty; see -adminauthfile for requiring authentication")
+	flg.StringVar(&addr, "addr", "", "address to webserve admin and metrics interfaces; cannot be used together with adminaddr and metricsaddr")
+	flg.StringVar(&adminAddr, "adminaddr", "", "if non-empty, address to serve only admin webserver; also see -addr; see -adminauthfile for requiring authentication")
 	flg.StringVar(&adminAuthFile, "adminauthfile", "", "file containing line of form 'user:password' for use with http basic auth for the non-webhook endpoints; if not specified, no authentication is enforced.")
-	flg.StringVar(&metricsAddr, "metricsaddr", "localhost:8524", "address to serve metrics webserver on if non-empty")
+	flg.StringVar(&metricsAddr, "metricsaddr", "", "if non-empty, address to serve only metrics webserver; also see -addr")
 	flg.TextVar(&logLevel, "loglevel", &logLevel, "loglevel, one of error, warn, info, debug")
 
 	flg.Usage = func() {
@@ -349,6 +351,14 @@ func run(args []string) {
 	if updateDelay < 5*time.Second {
 		log.Printf("-updatedelay must be >= 5s due to potential for rollback of previous update")
 		flg.Usage()
+	}
+	if addr != "" && (adminAddr != "" || metricsAddr != "") {
+		log.Printf("cannot use -addr with -adminaddr/-metricsaddr")
+		flg.Usage()
+	}
+	if addr != "" {
+		adminAddr = addr
+		metricsAddr = addr
 	}
 
 	if monitor != "" {
@@ -494,7 +504,7 @@ func run(args []string) {
 	if fi, err := os.Lstat(os.Args[0]); err != nil {
 		log.Fatalf("lstat %s to check for symlink: %v (try calling as full path)", os.Args[0], err)
 	} else if fi.Mode()&fs.ModeSymlink == 0 {
-		slog.Warn("tip: making ysco a symlink make sit possible to update it without interrupting the managed service")
+		slog.Warn("tip: making ysco a symlink makes it possible to update it without interrupting the managed service")
 	}
 
 	if username != "" {
@@ -534,8 +544,6 @@ func run(args []string) {
 		}
 	}
 
-	slog.Debug("starting", "adminaddr", adminAddr, "metricsaddr", metricsAddr, "cmd", cmdArgs)
-
 	// Read module & version from binary.
 	svcinfo, err := buildinfo.ReadFile(cmdArgs[0])
 	xcheckf(err, "reading buildinfo from command")
@@ -546,8 +554,11 @@ func run(args []string) {
 	}
 	updating.svcinfo = svcinfo
 	updating.selfinfo = selfinfo
+
+	slog.Info("ysco starting", "version", selfinfo.Main.Version+"/"+selfinfo.GoVersion, "svc", svcinfo.Path, "svcversion", svcinfo.Main.Version+"/"+svcinfo.GoVersion, "adminaddr", adminAddr, "metricsaddr", metricsAddr, "goos", runtime.GOOS, "goarch", runtime.GOARCH)
 	slog.Debug("service info", "modpath", svcinfo.Main.Path, "pkgdir", packageDir(svcinfo), "version", svcinfo.Main.Version, "goversion", svcinfo.GoVersion)
 	slog.Debug("self info", "modpath", selfinfo.Main.Path, "pkgdir", packageDir(selfinfo), "version", selfinfo.Main.Version, "goversion", selfinfo.GoVersion)
+	slog.Debug("starting service", "cmd", cmdArgs)
 
 	metricSelfVersion.WithLabelValues(selfinfo.Main.Version).Set(1)
 	metricSvcVersion.WithLabelValues(svcinfo.Main.Version).Set(1)
@@ -572,48 +583,62 @@ func run(args []string) {
 	oldBinaries.Svc, err = listOldBinaries("old-binaries-svc.txt")
 	xcheckf(err, "reading old-binaries-svc.txt")
 
-	if adminAddr != "" {
-		adminconn, err := net.Listen("tcp", adminAddr)
-		xcheckf(err, "listen for admin webserver")
-
-		if adminAuthFile != "" {
-			data, err := os.ReadFile(adminAuthFile)
-			xcheckf(err, "read admin auth file")
-			adminAuth = "Basic " + base64.StdEncoding.EncodeToString(bytes.TrimRight(data, "\n"))
-		}
-
-		handler := http.NewServeMux()
-		handler.HandleFunc("GET /{$}", handleIndexGet)
-		handler.HandleFunc("POST /{$}", handleIndexPost)
-		handler.HandleFunc("GET /json", handleJSONGet)
-		handler.HandleFunc("POST /notify", handleNotify)
-		handler.HandleFunc("POST /notifytoolchain", handleNotifyToolchain)
-		handler.HandleFunc("POST /update", handleUpdate)
-
-		go func() {
-			err := http.Serve(adminconn, handler)
-			xcheckf(err, "serve admin webserver")
-		}()
-	} else {
-		slog.Info("not serving admin http")
+	if adminAuthFile != "" {
+		data, err := os.ReadFile(adminAuthFile)
+		xcheckf(err, "read admin auth file")
+		adminAuth = "Basic " + base64.StdEncoding.EncodeToString(bytes.TrimRight(data, "\n"))
 	}
 
-	if metricsAddr != "" {
-		metricsconn, err := net.Listen("tcp", metricsAddr)
-		xcheckf(err, "listening for metrics webserver")
+	// Possibly a shared handler for admin & metrics.
+	adminHandler := http.NewServeMux()
+	metricsHandler := http.NewServeMux()
+	if adminAddr != "" && adminAddr == metricsAddr {
+		metricsHandler = adminHandler
+	}
 
-		handler := http.NewServeMux()
-		handler.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, "/metrics", http.StatusFound)
-		})
-		handler.Handle("GET /metrics", promhttp.Handler())
+	adminHandler.HandleFunc("GET /{$}", handleIndexGet)
+	adminHandler.HandleFunc("POST /{$}", handleIndexPost)
+	adminHandler.HandleFunc("GET /json", handleJSONGet)
+	adminHandler.HandleFunc("POST /notify", handleNotify)
+	adminHandler.HandleFunc("POST /notifytoolchain", handleNotifyToolchain)
+	adminHandler.HandleFunc("POST /update", handleUpdate)
+
+	metricsHandler.Handle("GET /metrics", promhttp.Handler())
+
+	if adminAddr != "" && adminAddr == metricsAddr {
+		// Single web server for both admin and metrics.
+		conn, err := net.Listen("tcp", adminAddr)
+		xcheckf(err, "listen for webserver")
 
 		go func() {
-			err := http.Serve(metricsconn, handler)
-			xcheckf(err, "serving metrics webserver")
+			err := http.Serve(conn, adminHandler)
+			xcheckf(err, "serve webserver")
 		}()
 	} else {
-		slog.Info("not serving metrics http")
+		if adminAddr != "" {
+			adminconn, err := net.Listen("tcp", adminAddr)
+			xcheckf(err, "listen for admin webserver")
+
+			go func() {
+				err := http.Serve(adminconn, adminHandler)
+				xcheckf(err, "serve admin webserver")
+			}()
+		}
+
+		if metricsAddr != "" {
+			// For separate metrics webserver, redirect user to metrics.
+			metricsHandler.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, "/metrics", http.StatusFound)
+			})
+
+			metricsconn, err := net.Listen("tcp", metricsAddr)
+			xcheckf(err, "listening for metrics webserver")
+
+			go func() {
+				err := http.Serve(metricsconn, metricsHandler)
+				xcheckf(err, "serving metrics webserver")
+			}()
+		}
 	}
 
 	if l, err := readScheduledTxt(); err != nil && !errors.Is(err, fs.ErrNotExist) {

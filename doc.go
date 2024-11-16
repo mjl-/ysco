@@ -130,8 +130,10 @@ minor versions are discovered.
 # Usage "ysco run"
 
 	usage: ysco run [flags] cmd ...
+	  -addr string
+	    	address to webserve admin and metrics interfaces; cannot be used together with adminaddr and metricsaddr
 	  -adminaddr string
-	    	address to serve admin webserver on if non-empty; see -adminauthfile for requiring authentication
+	    	if non-empty, address to serve only admin webserver; also see -addr; see -adminauthfile for requiring authentication
 	  -adminauthfile string
 	    	file containing line of form 'user:password' for use with http basic auth for the non-webhook endpoints; if not specified, no authentication is enforced.
 	  -cachedir string
@@ -143,7 +145,7 @@ minor versions are discovered.
 	  -loglevel value
 	    	loglevel, one of error, warn, info, debug (default INFO)
 	  -metricsaddr string
-	    	address to serve metrics webserver on if non-empty (default "localhost:8524")
+	    	if non-empty, address to serve only metrics webserver; also see -addr
 	  -monitor string
 	    	mechanism to lookup new modules/toolchains, comma-separated, next method is attempted on failure, values: dns, goproxy (default "dns,goproxy")
 	  -monitordelay duration
