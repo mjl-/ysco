@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,10 +12,11 @@ import (
 	"os"
 	"runtime/debug"
 
-	_ "embed"
-
 	"golang.org/x/mod/semver"
 )
+
+//go:embed "favicon.ico"
+var faviconIco embed.FS
 
 //go:embed "index.html"
 var indexHTML string
@@ -135,6 +137,10 @@ func gatherIndexArgs() indexArgs {
 		goversions,
 		os.Args,
 	}
+}
+
+func handleFavicon(w http.ResponseWriter, r *http.Request) {
+	http.ServeFileFS(w, r, faviconIco, "favicon.ico")
 }
 
 func handleJSONGet(w http.ResponseWriter, r *http.Request) {

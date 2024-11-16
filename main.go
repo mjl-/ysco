@@ -596,6 +596,7 @@ func run(args []string) {
 		metricsHandler = adminHandler
 	}
 
+	adminHandler.HandleFunc("GET /favicon.ico", handleFavicon)
 	adminHandler.HandleFunc("GET /{$}", handleIndexGet)
 	adminHandler.HandleFunc("POST /{$}", handleIndexPost)
 	adminHandler.HandleFunc("GET /json", handleJSONGet)
