@@ -875,7 +875,7 @@ func updateUpcoming() {
 	go func() {
 		xup := *up
 		// note: if up.Which is Self, update execs itself and never returns.
-		err := update(up.Which, up.ModPath, up.PkgDir, up.Version, up.GoVersion, &xup, nil, false)
+		err := update(up.Which, up.ModPath, up.PkgDir, up.Version, up.GoVersion, &xup, nil, false, false)
 		if err != nil {
 			slog.Error("updating failed", "err", err)
 		}
@@ -1238,7 +1238,7 @@ var errUpdateBusy = errors.New("update in progress")
 // When updating itself, when respWriter is not nil, its FD is passed to the
 // newly exec-ed process, which will write an http response indicating a
 // successful update.
-func update(which Which, modpath, pkgdir string, version, goversion string, up *Update, respWriter http.ResponseWriter, redirect bool) (rerr error) {
+func update(which Which, modpath, pkgdir string, version, goversion string, up *Update, respWriter http.ResponseWriter, redirect bool, manual bool) (rerr error) {
 	updating.Lock()
 	if updating.busy {
 		updating.Unlock()
@@ -1247,7 +1247,11 @@ func update(which Which, modpath, pkgdir string, version, goversion string, up *
 
 	defer func() {
 		if rerr != nil {
-			metricUpdateError.Inc()
+			// Don't register updating error for manually triggered updates. The operator will
+			// know about this, no need to trigger alerts.
+			if !manual {
+				metricUpdateError.Inc()
+			}
 
 			updating.Lock()
 			updating.busy = false

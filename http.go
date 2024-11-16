@@ -256,7 +256,7 @@ func handleIndexPost(w http.ResponseWriter, r *http.Request) {
 			respWriter = w
 		}
 		// note: if which is Self, and the update is successful, the process is replaced and this won't return.
-		if err := update(which, info.Main.Path, packageDir(info), version, goversion, nil, respWriter, true); err != nil {
+		if err := update(which, info.Main.Path, packageDir(info), version, goversion, nil, respWriter, true, true); err != nil {
 			if errors.Is(err, errUpdateBusy) {
 				httpErrorf(w, r, http.StatusBadRequest, "update busy")
 			} else {
@@ -371,7 +371,7 @@ func handleUpdate(w http.ResponseWriter, r *http.Request) {
 		respWriter = w
 	}
 	// note: if which is Self, and the update successful, the process is replaced and never returns.
-	if err := update(which, info.Main.Path, packageDir(info), version, goversion, nil, respWriter, false); err != nil {
+	if err := update(which, info.Main.Path, packageDir(info), version, goversion, nil, respWriter, false, true); err != nil {
 		if errors.Is(err, errUpdateBusy) {
 			httpErrorf(w, r, http.StatusBadRequest, "update busy")
 		} else {
