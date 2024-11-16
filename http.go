@@ -109,7 +109,7 @@ func gatherIndexArgs() indexArgs {
 	// Lookup all available versions.
 	var svcversions []string
 	var svcversionsError string
-	l, err := lookupModuleVersions(svcinfo.Main.Path)
+	l, err := lookupModuleVersions(slog.Default(), svcinfo.Main.Path)
 	if err != nil {
 		svcversionsError = err.Error()
 	}
@@ -122,7 +122,7 @@ func gatherIndexArgs() indexArgs {
 
 	var selfversions []string
 	var selfversionsError string
-	l, err = lookupModuleVersions(selfinfo.Main.Path)
+	l, err = lookupModuleVersions(slog.Default(), selfinfo.Main.Path)
 	if err != nil {
 		selfversionsError = err.Error()
 	}
@@ -135,7 +135,7 @@ func gatherIndexArgs() indexArgs {
 
 	var goversions []string
 	var goversionsError string
-	tc, err := lookupToolchainVersions()
+	tc, err := lookupToolchainVersions(slog.Default())
 	if err != nil {
 		goversionsError = err.Error()
 	}
@@ -325,7 +325,7 @@ func handleUpdate(w http.ResponseWriter, r *http.Request) {
 	lversion, lgoversion := latest(which, info)
 
 	if version == "latest" {
-		versions, err := lookupModuleVersions(info.Main.Path)
+		versions, err := lookupModuleVersions(slog.Default(), info.Main.Path)
 		if err != nil {
 			httpErrorf(w, r, http.StatusInternalServerError, "fetch latest version: %v", err)
 			return
@@ -346,7 +346,7 @@ func handleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if goversion == "latest" {
-		tc, err := lookupToolchainVersions()
+		tc, err := lookupToolchainVersions(slog.Default())
 		if err == nil && tc.Cur == "" {
 			err = fmt.Errorf("no current toolchain found")
 		}

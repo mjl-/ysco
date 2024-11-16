@@ -34,6 +34,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	xgoversion "go/version"
 	"io"
 	"io/fs"
 	"log"
@@ -201,7 +202,19 @@ var (
 	metricSvcUpdateAvailable = promauto.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "ysco_service_update_available",
-			Help: "Whether updates for managed service are available for installation.",
+			Help: "Whether updates for the managed service that match the policies are available for installation.",
+		},
+	)
+	metricSvcVersionAvailable = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "ysco_service_newer_version_available",
+			Help: "Whether a newer version for the managed service is available, regardless of goversion or policies.",
+		},
+	)
+	metricSvcGoVersionAvailable = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "ysco_service_newer_goversion_available",
+			Help: "Whether a newer go version for the managed service is available, regardless of version or policies.",
 		},
 	)
 	metricSvcUpdateScheduled = promauto.NewGauge(
@@ -219,7 +232,19 @@ var (
 	metricSelfUpdateAvailable = promauto.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "ysco_self_update_available",
-			Help: "Whether updates for ysco are available for installation.",
+			Help: "Whether updates for ysco that match the policies are available for installation.",
+		},
+	)
+	metricSelfVersionAvailable = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "ysco_self_newer_version_available",
+			Help: "Whether a newer version for ysco is available, regardless of goversion or policies.",
+		},
+	)
+	metricSelfGoVersionAvailable = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "ysco_self_newer_goversion_available",
+			Help: "Whether a newer go version for ysco is available, regardless of version or policies.",
 		},
 	)
 	metricSelfUpdateScheduled = promauto.NewGauge(
@@ -797,12 +822,16 @@ func reschedule() {
 	metricSelfUpdateScheduled.Set(nself)
 	metricSvcUpdateScheduled.Set(nsvc)
 
+	updating.Lock()
+	paused := updating.pauseReason != ""
+	updating.Unlock()
+
 	var up *Update
 	if i := updateUpcomingFindIndex(); i >= 0 {
 		up = &schedule.updates[i]
 	}
 
-	if up != nil && (schedule.up == nil || up.Time.Before(schedule.up.Time)) {
+	if !paused && up != nil && (schedule.up == nil || up.Time.Before(schedule.up.Time)) {
 		schedule.up = up
 
 		// Take backoff into account, if any.
@@ -1067,7 +1096,7 @@ func monitorOne() (rerr error) {
 		return nil
 	}
 
-	tc, err := lookupToolchainVersions()
+	tc, err := lookupToolchainVersions(slog.Default())
 	if err != nil {
 		slog.Error("looking up toolchain version", "err", err)
 		rerr = err
@@ -1086,17 +1115,34 @@ func monitorOne() (rerr error) {
 	selfinfo := updating.selfinfo
 	updating.Unlock()
 
-	if err := lookupUpdates(Svc, svcinfo, policySvc, policySvcToolchain, tc); err != nil {
+	// Update metrics for available go versions.
+	metricSvcGoVersionAvailable.Set(boolGauge(xgoversion.Compare(tc.Cur, svcinfo.GoVersion) > 0))
+	metricSelfGoVersionAvailable.Set(boolGauge(xgoversion.Compare(tc.Cur, selfinfo.GoVersion) > 0))
+
+	if versAvail, upAvail, err := scheduleUpdate(Svc, svcinfo, policySvc, policySvcToolchain, tc); err != nil {
 		slog.Error("looking for updates for service", "err", err)
 		rerr = err
+	} else {
+		metricSvcVersionAvailable.Set(boolGauge(versAvail))
+		metricSvcUpdateAvailable.Set(boolGauge(upAvail))
 	}
 
-	if err := lookupUpdates(Self, selfinfo, policySelf, policySelfToolchain, tc); err != nil {
+	if versAvail, upAvail, err := scheduleUpdate(Self, selfinfo, policySelf, policySelfToolchain, tc); err != nil {
 		slog.Error("looking for updates for self", "err", err)
 		rerr = err
+	} else {
+		metricSelfVersionAvailable.Set(boolGauge(versAvail))
+		metricSelfUpdateAvailable.Set(boolGauge(upAvail))
 	}
 
 	return rerr
+}
+
+func boolGauge(v bool) float64 {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 func packageDir(info *debug.BuildInfo) string {
@@ -1107,126 +1153,128 @@ func packageDir(info *debug.BuildInfo) string {
 	return pkgdir
 }
 
-func lookupUpdates(which Which, info *debug.BuildInfo, pol, poltc string, tc Toolchains) error {
+func scheduleUpdate(which Which, info *debug.BuildInfo, pol, poltc string, tc Toolchains) (versionAvail, updateAvail bool, rerr error) {
 	modpath := info.Main.Path
-	pkgdir := packageDir(info)
 
-	version, goversion := latest(which, info)
+	log := slog.With("modpath", modpath)
 
-	log := slog.With("modpath", modpath, "version", version, "goversion", goversion)
-
-	if version == "" || version == "(devel)" {
+	// If we don't know our current version, there's no point in looking for the latest version.
+	if info.Main.Version == "" || info.Main.Version == "(devel)" {
 		log.Debug("unknown current version, skipping check")
-		return nil
+		return false, false, nil
 	}
+
+	// Look up latest version in DNS and/or Go module proxy.
+	versions, err := lookupModuleVersions(log, modpath)
+	if err != nil {
+		return false, false, fmt.Errorf("looking up latest module versions for %q: %w", modpath, err)
+	}
+
+	// Log available versions.
+	fulls := make([]string, len(versions))
+	for i, v := range versions {
+		fulls[i] = v.Full
+	}
+	log.Debug("latest available versions", "versions", fulls)
+
+	// See if there's any update at all compared to current version, for metric.
+	for _, nv := range versions {
+		if semver.Compare(nv.Full, info.Main.Version) > 0 {
+			versionAvail = true
+			break
+		}
+	}
+
+	// Determine if update is available according to policies, compared to what we
+	// are currently running.
+	iv, err := parseVersion(info.Main.Version, time.Time{})
+	if err != nil {
+		log.Error("parsing currently active version, ignoring", "err", err, "which", which, "version", info.Main.Version)
+	} else {
+		_, _, updateAvail, _ = policyPickVersion(log, pol, poltc, tc, iv, info.GoVersion, info.GoVersion, versions)
+	}
+
+	// Schedule updates, comparing against current version or updates already scheduled.
+	version, goversion := latest(which, info)
 
 	v, err := parseVersion(version, time.Time{})
 	if err != nil {
-		log.Debug("parsing current version", "err", err)
-		return nil
+		return false, false, fmt.Errorf("parsing current version: %v", err)
 	}
 
-	versions, err := lookupModuleVersions(modpath)
-	if err != nil {
-		metricMonitorError.Inc()
-		log.Info("looking up versions", "err", err)
-		return nil
-	} else {
-		fulls := make([]string, len(versions))
-		for i, v := range versions {
-			fulls[i] = v.Full
-		}
-		log.Debug("latest available versions", "versions", fulls)
-	}
-	var foundMajor bool
-	for _, nv := range versions {
-		if nv.Major != v.Major {
-			continue
-		}
-		foundMajor = true
+	log = log.With("refversion", version, "refgoversion", goversion)
 
-		destVersion := nv.Full
-
-		destGoVersion := goversion
-		// todo: could handle updating to a new release candidate.
-		switch poltc {
-		case "minor":
-			destGoVersion = tc.Cur
-		case "patch", "supported", "follow":
-			t := strings.Split(destGoVersion, ".")
-			if len(t) != 3 {
-				log.Error("unrecognized goversion", "goversion", destGoVersion)
-				return nil
-			}
-			prefix := strings.Join(t[:2], ".") + "."
-			if strings.HasPrefix(tc.Cur, prefix) {
-				destGoVersion = tc.Cur
-			} else if strings.HasPrefix(tc.Prev, prefix) || poltc == "supported" || poltc == "follow" {
-				destGoVersion = tc.Prev
-			}
-
-			// For a new release, update to latest toolchain, assuming application is tested with it.
-			if poltc == "follow" && semver.Compare(v.Full, nv.Full) < 0 {
-				destGoVersion = tc.Cur
-			}
-		}
-
-		if cmp := semver.Compare(v.Full, nv.Full); cmp > 0 {
-			log.Error("new version is older than current, ignoring", "newversion", nv.Full)
-			break
-		} else if cmp == 0 && destGoVersion == goversion {
-			if which == Self {
-				metricSelfUpdateAvailable.Set(0)
-			} else {
-				metricSvcUpdateAvailable.Set(0)
-			}
-			log.Debug("version unchanged")
-			break
-		} else if cmp == 0 {
-			destVersion = v.Full
-		} else if nv.Minor != v.Minor && pol == "patch" {
-			if which == Self {
-				metricSelfUpdateAvailable.Set(1)
-			} else {
-				metricSvcUpdateAvailable.Set(1)
-			}
-			log.Error("not updating to new minor according to policy", "newversion", nv.Full)
-			break
-		}
-		log.Info("found new version", "newversion", destVersion, "newtoolchain", destGoVersion)
-		if pol == "manual" {
-			if which == Self {
-				metricSelfUpdateAvailable.Set(1)
-			} else {
-				metricSvcUpdateAvailable.Set(1)
-			}
-			log.Info("not updating due to policy manual")
-			break
-		}
-		updating.Lock()
-		pauseReason := updating.pauseReason
-		updating.Unlock()
-		if pauseReason != "" {
-			if which == Self {
-				metricSelfUpdateAvailable.Set(1)
-			} else {
-				metricSvcUpdateAvailable.Set(1)
-			}
-			log.Warn("not updating since automatic updates are paused", "reason", pauseReason)
-			break
-		}
-
-		next := updateSchedule.Next(time.Now().Add(updateDelay))
-		schedule.Lock()
-		schedule.updates = append(schedule.updates, Update{next, which, modpath, pkgdir, destVersion, destGoVersion})
-		reschedule()
-		schedule.Unlock()
-		return nil
-	}
+	nvers, ngovers, update, foundMajor := policyPickVersion(log, pol, poltc, tc, v, goversion, info.GoVersion, versions)
 	if !foundMajor {
 		log.Debug("no matching major version found")
+		return
+	} else if !update {
+		log.Debug("no update found")
+		return
 	}
-	return nil
+	log.Info("found new version", "newversion", nvers.Full, "newtoolchain", ngovers)
+	if pol == "manual" {
+		log.Debug("not scheduling update due to policy manual")
+		return
+	}
+	next := updateSchedule.Next(time.Now().Add(updateDelay))
+	schedule.Lock()
+	schedule.updates = append(schedule.updates, Update{next, which, modpath, packageDir(info), nvers.Full, ngovers})
+	reschedule()
+	schedule.Unlock()
+	return
+}
+
+// pick one of versions to update to (if any) based on reference vers and
+// govers (with fallback to curgovers if govers can't be parsed), based on
+// policies (pol, poltc).
+func policyPickVersion(log *slog.Logger, pol, poltc string, tc Toolchains, vers Version, govers, curgovers string, versions []Version) (nvers Version, ngovers string, update bool, foundMajor bool) {
+	ngovers = govers
+	// todo: could handle updating to a new release candidate.
+	switch poltc {
+	case "minor":
+		ngovers = tc.Cur
+	case "patch", "supported", "follow":
+		t := strings.Split(ngovers, ".")
+		if len(t) != 3 {
+			log.Error("unrecognized goversion, sticking to current", "goversion", ngovers)
+			ngovers = curgovers
+		} else {
+			prefix := strings.Join(t[:2], ".") + "."
+			if strings.HasPrefix(tc.Cur, prefix) {
+				ngovers = tc.Cur
+			} else if strings.HasPrefix(tc.Prev, prefix) || poltc == "supported" || poltc == "follow" {
+				ngovers = tc.Prev
+			}
+		}
+		// ngovers can be updated below, for policy "follow" in case of a new service version.
+	}
+
+	// Schedule update according to policy.
+	for _, nv := range versions {
+		if nv.Major != vers.Major {
+			continue
+		}
+
+		foundMajor = true
+
+		// Once we find a version that is same or older, we can stop looking.
+		if pol == "manual" || nv.Minor < vers.Minor || nv.Minor == vers.Minor && (nv.Patch < vers.Patch || semver.Compare(nv.Full, vers.Full) <= 0) {
+			break
+		}
+
+		if nv.Minor != vers.Minor && pol != "minor" {
+			continue
+		}
+
+		// For a new release, update to latest toolchain, assuming application is tested with it.
+		if poltc == "follow" {
+			ngovers = tc.Cur
+		}
+		return nv, ngovers, true, foundMajor
+	}
+
+	return vers, ngovers, govers != ngovers, foundMajor
 }
 
 var errUpdateBusy = errors.New("update in progress")
@@ -1252,7 +1300,10 @@ func update(which Which, modpath, pkgdir string, version, goversion string, up *
 			if !manual {
 				metricUpdateError.Inc()
 			}
-
+		}
+		// For updates of the service, busy is cleared after a grace period. For
+		// self-updates or errors, we clear it now.
+		if which == Self || rerr != nil {
 			updating.Lock()
 			updating.busy = false
 			updating.Unlock()

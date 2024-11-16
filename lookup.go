@@ -7,9 +7,9 @@ import (
 	"time"
 )
 
-func lookupToolchainVersions() (rtc Toolchains, rerr error) {
+func lookupToolchainVersions(log *slog.Logger) (rtc Toolchains, rerr error) {
 	defer func() {
-		slog.Debug("result of looking up toolchains", "modpath", "golang.org/toolchain", "toolchains", rtc, "err", rerr)
+		log.Debug("result of looking up toolchains", "modpath", "golang.org/toolchain", "toolchains", rtc, "err", rerr)
 	}()
 
 	err := fmt.Errorf("no monitor mechanisms")
@@ -34,13 +34,14 @@ func lookupToolchainVersions() (rtc Toolchains, rerr error) {
 			return tc, nil
 		}
 		metricMonitorError.Inc()
+		log.Error("looking up toolchains", "err", err, "monitor", m)
 	}
 	return Toolchains{}, err
 }
 
-func lookupModuleVersions(modpath string) (rversions []Version, rerr error) {
+func lookupModuleVersions(log *slog.Logger, modpath string) (rversions []Version, rerr error) {
 	defer func() {
-		slog.Debug("result of looking up module", "modpath", modpath, "versions", rversions, "err", rerr)
+		log.Debug("result of looking up module", "modpath", modpath, "versions", rversions, "err", rerr)
 	}()
 
 	err := fmt.Errorf("no monitor mechanisms")
@@ -61,6 +62,7 @@ func lookupModuleVersions(modpath string) (rversions []Version, rerr error) {
 			return versions, nil
 		}
 		metricMonitorError.Inc()
+		log.Error("looking up module", "err", err, "monitor", m)
 	}
 	return nil, err
 }
