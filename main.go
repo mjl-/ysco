@@ -284,7 +284,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "       ysco licenses")
 		fmt.Fprintln(os.Stderr, "       ysco version")
 		flag.PrintDefaults()
-		os.Exit(2)
+		os.Exit(3)
 	}
 	flag.Parse()
 	args := flag.Args()
@@ -341,7 +341,7 @@ func run(args []string) {
 	flg.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: ysco run [flags] cmd ...")
 		flg.PrintDefaults()
-		os.Exit(2)
+		os.Exit(3)
 	}
 	flg.Parse(args)
 	cmdArgs = flg.Args()

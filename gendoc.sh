@@ -1,5 +1,6 @@
-#!/bin/sh
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
+# set -x
 
 (
 cat <<'EOF'
@@ -129,14 +130,26 @@ minor versions are discovered.
 # Usage "ysco"
 
 EOF
-./ysco 2>&1 | sed 's/^/	/g'
+set +e
+./ysco 2>gendoc.tmp
+ret=$?
+if test $ret -ne 3; then exit 1; fi
+set -e
+cat gendoc.tmp | sed 's/^/	/g'
+rm gendoc.tmp
 
 cat <<EOF
 
 # Usage "ysco run"
 
 EOF
-./ysco run 2>&1 | sed 's/^/	/g'
+set +e
+./ysco run 2>gendoc.tmp
+ret=$?
+if test $ret -ne 3; then exit 1; fi
+set -e
+cat gendoc.tmp | sed 's/^/	/g'
+rm gendoc.tmp
 
 cat <<EOF
 */

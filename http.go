@@ -9,8 +9,10 @@ import (
 	htmltemplate "html/template"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"runtime/debug"
+	"strings"
 
 	"golang.org/x/mod/semver"
 )
@@ -21,7 +23,38 @@ var faviconIco embed.FS
 //go:embed "index.html"
 var indexHTML string
 
-var indextempl = htmltemplate.Must(htmltemplate.New("index.html").Parse(indexHTML))
+var indextempl = htmltemplate.Must(htmltemplate.New("index.html").Funcs(htmltemplate.FuncMap{
+	"tagURL": tagURL,
+}).Parse(indexHTML))
+
+// tagURL returns a guessed url to the tag in source control that may contain
+// release notes, but may also be an incorrect url.
+func tagURL(modpath, version string) string {
+	var repoURL, tagURL string
+
+	// Based on code from github.com/mjl-/gopherwatch, compose.go.
+	t := strings.Split(modpath, "/")
+	host := t[0]
+	if strings.Contains(host, "github") && len(t) >= 3 {
+		repoURL = "https://" + strings.Join(t[:3], "/")
+		tagURL = repoURL + "/releases/tag/" + url.QueryEscape(strings.Join(append(t[3:], version), "/"))
+	} else if strings.Contains(host, "gitlab") && len(t) >= 3 {
+		repoURL = "https://" + strings.Join(t[:3], "/")
+		tagURL = repoURL + "/-/tags/" + version
+	} else if strings.Contains(host, "codeberg") {
+		repoURL = "https://" + strings.Join(t[:3], "/")
+		tagURL = repoURL + "/releases/tag/" + version
+	} else if strings.Contains(host, "sr.ht") {
+		repoURL = "https://" + strings.Join(t[:3], "/")
+		tagURL = repoURL + "/refs/" + version
+	} else if host == "golang.org" && len(t) >= 3 && t[1] == "x" {
+		repoURL = "https://github.com/golang/" + t[2]
+		tagURL = repoURL + "/releases/tag/" + url.QueryEscape(strings.Join(append(t[3:], version), "/"))
+	}
+	// bitbucket doesn't seem to have a URL for just the tag (and the message associated), only trees or commits.
+
+	return tagURL
+}
 
 func httpErrorf(w http.ResponseWriter, r *http.Request, code int, format string, args ...any) {
 	err := fmt.Sprintf(format, args...)

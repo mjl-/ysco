@@ -13,6 +13,7 @@ h3 { font-size: 1em; }
 ul { padding-left: 1em; }
 p { margin-bottom: 1ex; }
 th, td { padding: .2em .1em; }
+[title] { text-decoration-style: dotted; }
 		</style>
 	</head>
 	<body>
@@ -37,6 +38,7 @@ th, td { padding: .2em .1em; }
 					<th>Version</th>
 					<th>GoVersion</th>
 					<th>Time</th>
+					<th>Tag</th>
 					<th>Action</th>
 				</tr>
 			</thead>
@@ -48,6 +50,7 @@ th, td { padding: .2em .1em; }
 					<td>{{ $row.Version }}</td>
 					<td>{{ $row.GoVersion }}</td>
 					<td>{{ $row.Time.Format "2006-01-02 15:04:05" }}</td>
+					<td>{{ $tag := tagURL $row.ModPath $row.Version }} {{ if $tag }}<a title="Guessed URL for tag, may contain release notes, not be incorrect." href="{{ $tag }}">tag</a>{{ end }}</td>
 					<td>
 						<form method="POST">
 							<input type="hidden" name="command" value="update" />
@@ -78,8 +81,12 @@ th, td { padding: .2em .1em; }
 				{{ end }}
 					<ul>
 					{{ $curversion := .SvcVersion }}
+					{{ $SvcModPath := .SvcModPath }}
 					{{ range $version := .SvcVersions }}
-						<li><label><input type="radio" name="version" value="{{ $version }}" {{ if eq $version $curversion }}checked{{ end }} /> {{ $version }}</label></li>
+						<li>
+							<label><input type="radio" name="version" value="{{ $version }}" {{ if eq $version $curversion }}checked{{ end }} /> {{ $version }}</label>
+							{{ if tagURL $SvcModPath $version }}<a title="Guessed URL for tag, may contain release notes, not be incorrect." href="{{ tagURL $SvcModPath $version }}">tag</a>{{ end }}
+						</li>
 					{{ end }}
 					</ul>
 				</div>
@@ -127,8 +134,13 @@ th, td { padding: .2em .1em; }
 				{{ end }}
 					<ul>
 					{{ $curversion := .SelfVersion }}
+					{{ $SelfModPath := .SelfModPath }}
 					{{ range $version := .SelfVersions }}
-						<li><label><input type="radio" name="version" value="{{ $version }}" {{ if eq $version $curversion }}checked{{ end }} /> {{ $version }}</label></li>
+						<li>
+							<label><input type="radio" name="version" value="{{ $version }}" {{ if eq $version $curversion }}checked{{ end }} /> {{ $version }}</label>
+
+							{{ if tagURL $SelfModPath $version }}<a title="Guessed URL for tag, may contain release notes, not be incorrect." href="{{ tagURL $SelfModPath $version }}">tag</a>{{ end }}
+						</li>
 					{{ end }}
 					</ul>
 				</div>
