@@ -1500,7 +1500,13 @@ func updateInstall(which Which, dr downloadResult, manual bool, respWriter http.
 	}
 
 	if _, err := os.Stat(dr.versionPath); err == nil {
-		return fmt.Errorf("target version path %s already exists", dr.versionPath)
+		if isOldBinary(which, dr.versionPath) {
+			if err := os.Remove(dr.versionPath); err != nil {
+				return fmt.Errorf("target version path %s already existed, was previously installed, removing failed: %v", dr.versionPath, err)
+			}
+		} else {
+			return fmt.Errorf("target version path %s already exists", dr.versionPath)
+		}
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("stat target version path %s: %v", dr.versionPath, err)
 	}
@@ -1596,7 +1602,20 @@ func updateInstall(which Which, dr downloadResult, manual bool, respWriter http.
 	return nil
 }
 
-// must be called with oldBinariesMu locked.
+// must be called without oldBinaries locked.
+func isOldBinary(which Which, path string) bool {
+	oldBinaries.Lock()
+	defer oldBinaries.Unlock()
+	var l []string
+	if which == Self {
+		l = oldBinaries.Self
+	} else {
+		l = oldBinaries.Svc
+	}
+	return slices.Contains(l, path)
+}
+
+// must be called with oldBinaries locked.
 func updateBinariesTxt(old []string, txtPath, prevPath, newPath string) (newOld []string) {
 	slog.Debug("maintenance for old binaries", "txtpath", txtPath, "prev", prevPath, "new", newPath)
 	if prevPath == newPath {
