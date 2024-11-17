@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	htmltemplate "html/template"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 
@@ -232,6 +234,31 @@ func handleIndexPost(w http.ResponseWriter, r *http.Request) {
 			httpErrorf(w, r, http.StatusInternalServerError, "updating: %v", err)
 			return
 		}
+
+	case "pause":
+		updating.Lock()
+		reason := "manually paused"
+		err := os.WriteFile(filepath.Join(cacheDir, "pause.txt"), []byte(reason), 0640)
+		if err != nil {
+			httpErrorf(w, r, http.StatusInternalServerError, "writing pause.txt: %v", err)
+			return
+		}
+		updating.pauseReason = reason
+		metricUpdatesPaused.Set(1)
+		updating.Unlock()
+		slog.Info("paused updates")
+
+	case "unpause":
+		updating.Lock()
+		err := os.Remove(filepath.Join(cacheDir, "pause.txt"))
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			httpErrorf(w, r, http.StatusInternalServerError, "removing pause.txt: %v", err)
+			return
+		}
+		updating.pauseReason = ""
+		metricUpdatesPaused.Set(0)
+		updating.Unlock()
+		slog.Info("unpaused updates")
 
 	case "update":
 		which := Which(r.FormValue("which"))

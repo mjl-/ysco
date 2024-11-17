@@ -948,6 +948,7 @@ func pickupProcess(statestr string) {
 	os.Remove(filepath.Join(cacheDir, "pause.txt"))
 	updating.Lock()
 	updating.pauseReason = ""
+	metricUpdatesPaused.Set(0)
 	updating.Unlock()
 
 	if es.RequestFD > 0 {
@@ -1038,7 +1039,7 @@ func handleExit(when string, err error) {
 	// Creating pause.txt so we don't try any more automatic updates.
 	binName := fmt.Sprintf("%s-%s-%s", path.Base(updating.svcinfo.Main.Path), updating.svcinfo.Main.Version, updating.svcinfo.GoVersion)
 	updating.pauseReason = fmt.Sprintf("binary %s exited within 5s: %v\n", binName, err)
-	if err := os.WriteFile(filepath.Join(cacheDir, "pause.txt"), []byte(updating.pauseReason), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(cacheDir, "pause.txt"), []byte(updating.pauseReason), 0640); err != nil {
 		slog.Error("writing pause.txt failed", "err", err)
 	}
 

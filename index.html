@@ -23,11 +23,22 @@ th, td { padding: .2em .1em; }
 			<input type="hidden" name="command" value="check" />
 			<button>Check for updates</button>
 		</form>
+		<br/>
 
-		<h2>Scheduled updates</h2>
 	{{ if .PauseReason }}
 		<p>Note: Updates are paused until manual intervention: {{ .PauseReason }}</p>
+		<form method="POST">
+			<input type="hidden" name="command" value="unpause" />
+			<button>Unpause updates</button>
+		</form>
+	{{ else }}
+		<form method="POST">
+			<input type="hidden" name="command" value="pause" />
+			<button>Pause updates</button>
+		</form>
 	{{ end }}
+
+		<h2>Scheduled updates</h2>
 	{{ if .Scheduled }}
 		<p>According to policy, time of discovery and update schedule:</p>
 		<table>
