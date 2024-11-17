@@ -55,7 +55,7 @@ DNSSEC-verifying resolver.
 
 Ysco automatically retrieves a binary through the gobuild service.  Gobuild
 retrieves source code from the Go module proxy, verified through the Go sum
-database, and build a binary for any Go toolchain/OS/architecture.  The hash of
+database, and builds a binary for any Go toolchain/OS/architecture.  The hash of
 the binary is added to the gobuild transparency log (similar to the Go sum
 database), to build trust in its correct operation.
 
@@ -75,21 +75,23 @@ versions of modules.
 
 For new Go toolchains, by default new patch releases will cause an update to be
 installed. But if a new module version is published, the latest Go toolchain is
-supposed, under the assumption that a new release was tested with the latest Go
-releases. Also, if a new Go toolchain is installed, and the currently used
+used, under the assumption that a new release was tested with the latest Go
+release. Also, if a new Go toolchain was released, and the currently used
 toolchain is no longer supported, an update using the latest "previous" Go
 toolchain is installed. This is the "follow" policy. The "supported" mode is
 similar, but does not update to the latest Go toolchain version when a new
 module version is discovered.
 
+The "manual" policy can be used for single-click manual updating.
+
 # Update schedule
 
-Once a new module or toolchain version is discovered, and it matched the
-configured policy, a new update will be scheduled. You can configure a schedule
-with days/hours during which updates should be installed, e.g. during working
-hours, or in evenings or weekends. This should prevent botched updates from
-requiring your attention at inconvenient hours. By default, updates are
-scheduled with a 24 hour delay after discovery.
+When a new module or toolchain version is discovered, and it matched the
+configured policy, a new update is scheduled. You can configure a schedule with
+days/hours during which updates should be installed, e.g. during working hours,
+or in evenings or weekends. This should prevent botched updates from requiring
+your attention at inconvenient hours. By default, updates are scheduled with a
+24 hour delay after discovery.
 
 # Web interface and metrics
 
@@ -166,6 +168,8 @@ minor versions are discovered.
 	    	policy for updating service: patch, minor, manual (default "patch")
 	  -policysvctoolchain string
 	    	policy for updating service: patch, minor, manual, supported, follow (default "follow")
+	  -updateall
+	    	update through all scheduled updates, not overwriting pending updates when a new version is discovered
 	  -updatedelay duration
 	    	delay between finding module update and updating (default 24h0m0s)
 	  -updatejitter duration

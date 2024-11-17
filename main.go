@@ -84,6 +84,7 @@ var policySelfToolchain string
 var updateDelay time.Duration // Minimum time to wait between a new version was discovered and updating to it.
 var updateSchedule Schedule
 var updateJitter time.Duration // Random value between 0 and this value added to delay time before updating.
+var updateAll bool             // Update through all versions discovered, not overwriting pending updates when a new update comes in.
 var gobuildVerifier string     // Verifier key (and address) for gobuild transparency log.
 var addr string
 var adminAddr string
@@ -153,7 +154,7 @@ var schedule struct {
 	// latest (last) that we've already planned.
 	updates []Update
 
-	// update currently planned for installing when timer expires, if any. will
+	// Update currently planned for installing when timer expires, if any. Will
 	// be checked again against schedule.updates when timer triggers.
 	up *Update
 }
@@ -358,6 +359,7 @@ func run(args []string) {
 	flg.DurationVar(&updateDelay, "updatedelay", 24*time.Hour, "delay between finding module update and updating")
 	flg.TextVar(&updateSchedule, "updateschedule", &Schedule{}, "schedule during which updates can be done: semicolon separated tokens with days and/or hours, each comma-separated of which each a single or dash-separated range; hours from 0-23, days from su-sa; examples: 'mo-fr 9-16' for during work days, 'mo-fr 18-22; sa,su 9-18' for workday evenings and weekends; updates are scheduled in the first available hour, taking backoff and jitter into account")
 	flg.DurationVar(&updateJitter, "updatejitter", time.Hour, "maximum random delay within the scheduled hour to delay")
+	flg.BoolVar(&updateAll, "updateall", false, "update through all scheduled updates, not overwriting pending updates when a new version is discovered")
 	flg.StringVar(&addr, "addr", "", "address to webserve admin and metrics interfaces; cannot be used together with adminaddr and metricsaddr")
 	flg.StringVar(&adminAddr, "adminaddr", "", "if non-empty, address to serve only admin webserver; also see -addr; see -adminauthfile for requiring authentication")
 	flg.StringVar(&adminAuthFile, "adminauthfile", "", "file containing line of form 'user:password' for use with http basic auth for the non-webhook endpoints; if not specified, no authentication is enforced.")
@@ -1221,6 +1223,16 @@ func scheduleUpdate(which Which, info *debug.BuildInfo, pol, poltc string, tc To
 	}
 	next := updateSchedule.Next(time.Now().Add(updateDelay))
 	schedule.Lock()
+	if !updateAll {
+		// Remove any pending updates for which.
+		var l []Update
+		for _, e := range schedule.updates {
+			if e.Which != which {
+				l = append(l, e)
+			}
+		}
+		schedule.updates = l
+	}
 	schedule.updates = append(schedule.updates, Update{next, which, modpath, packageDir(info), nvers.Full, ngovers})
 	reschedule()
 	schedule.Unlock()
