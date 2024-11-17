@@ -57,6 +57,7 @@ import (
 	"time"
 
 	"golang.org/x/mod/semver"
+	"golang.org/x/sys/unix"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -1547,7 +1548,7 @@ func updateInstall(which Which, dr downloadResult, manual bool, respWriter http.
 				slog.Error("cannot get file for connection")
 			} else if f, err = filer.File(); err != nil {
 				slog.Error("get file for connection", "err", err)
-			} else if _, _, errno := syscall.Syscall(syscall.SYS_FCNTL, f.Fd(), syscall.F_SETFD, 0); errno != 0 {
+			} else if _, err := unix.FcntlInt(f.Fd(), unix.F_SETFD, 0); err != nil {
 				f.Close()
 				slog.Error("clearing close-on-exec", "err", err)
 			} else {
@@ -1555,6 +1556,7 @@ func updateInstall(which Which, dr downloadResult, manual bool, respWriter http.
 			}
 
 			// Only called if we fail below. Otherwise we are replaced and this never executes.
+			// This also keeps f alive.
 			defer f.Close()
 		}
 
@@ -1567,7 +1569,7 @@ func updateInstall(which Which, dr downloadResult, manual bool, respWriter http.
 		env := append([]string{}, os.Environ()...)
 		env = append(env, fmt.Sprintf("_YSCO_EXEC=%s", esbuf))
 		slog.Debug("exec with environment", "env", env)
-		if err := syscall.Exec(os.Args[0], os.Args, env); err != nil {
+		if err := unix.Exec(os.Args[0], os.Args, env); err != nil {
 			slog.Error("exec", "err", err)
 			return err
 		}
