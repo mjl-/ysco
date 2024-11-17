@@ -82,7 +82,17 @@ func (c *clientOps) ReadRemote(path string) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("http get: %v", resp.Status)
+		var msg string
+		buf, err := io.ReadAll(resp.Body)
+		if err != nil {
+			msg = fmt.Sprintf("(reading body: %v)", err)
+		} else {
+			msg = string(buf)
+			if len(msg) > 512 {
+				msg = msg[:500] + "..."
+			}
+		}
+		return nil, fmt.Errorf("http get: %v (%s)", resp.Status, msg)
 	}
 	return io.ReadAll(resp.Body)
 }
