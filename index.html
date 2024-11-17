@@ -19,6 +19,10 @@ th, td { padding: .2em .1em; }
 	<body>
 		<h1 style="margin-top: 0">Ysco - Managed automated updates</h1>
 
+	{{ if .UpdateBusy }}
+		<p>An update is busy (likely waiting to ensure new process doesn't exit quickly after restart).</p>
+	{{ end }}
+
 		<form method="POST">
 			<input type="hidden" name="command" value="check" />
 			<button>Check for updates</button>

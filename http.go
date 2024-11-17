@@ -77,6 +77,7 @@ type indexArgs struct {
 	SelfPkgDir        string
 	SelfVersion       string
 	SelfGoVersion     string
+	UpdateBusy        bool
 	PauseReason       string
 	Scheduled         []Update
 	OldBinariesSelf   []string
@@ -96,6 +97,7 @@ func gatherIndexArgs() indexArgs {
 	schedule.Unlock()
 
 	updating.Lock()
+	updateBusy := updating.busy
 	pauseReason := updating.pauseReason
 	svcinfo := updating.svcinfo
 	selfinfo := updating.selfinfo
@@ -160,6 +162,7 @@ func gatherIndexArgs() indexArgs {
 		packageDir(selfinfo),
 		selfinfo.Main.Version,
 		selfinfo.GoVersion,
+		updateBusy,
 		pauseReason,
 		scheduled,
 		oldbinsself,
