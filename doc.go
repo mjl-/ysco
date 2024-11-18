@@ -14,10 +14,27 @@ proxy, Go sum database and gobuild instance with access to private code).
 
 # Example
 
-To use, just put "ysco run" in front of the regular command-line used to start
-the service. For example:
+To start using ysco, first run "ysco init" with a Go application package path
+as parameter. That writes a config file "./ys/ysco.conf", writes a password for
+the admin interface to "./ys/password.txt", downloads a binary for the latest
+version/goversion of the application from the gobuilds.org service, creates
+short symlinks to the application binary and the ysco binary and finally prints
+the command to run.
 
-	./ysco run [yscoflags] ./app [appflags]
+For example, to initialize for application github.com/mjl-/moxtools using an
+ysco binary downloaded from
+https://beta.gobuilds.org/github.com/mjl-/ysco@latest/linux-amd64-latest-stripped/:
+
+	$ ./ysco-v0.1.0-go1.23.3 init github.com/mjl-/moxtools
+	downloading github.com/mjl-/moxtools@v0.0.5/...
+	initialized ys/, created symlinks ysco and moxtools, admin interface will be at http://admin:0jv9oQmWe34i@localhost:1234/ after starting:
+	./ysco run -addr localhost:1234 ./moxtools #[flags]
+
+Then we start:
+
+	$ ./ysco run -addr localhost:1234 ./moxtools
+	level=INFO msg="ysco starting" ysco="" version=v0.1.0/go1.23.3 svc=github.com/mjl-/moxtools svcversion=v0.0.5/go1.23.3 adminaddr=localhost:1234 metricsaddr=localhost:1234 goos=linux goarch=amd64
+	l=print m="serving" pkg=moxtools listen=:8080 listenmetrics=:8081 hostname=x1 version=v0.0.5 goversion=go1.23.3 goos=linux goarch=amd64
 
 # Mode of operation
 
@@ -40,8 +57,6 @@ it easy to see which is the current version from command-line tools like "ls".
 When updating, the previous binary is kept in the file system, but older
 binaries are automatically cleaned up.
 
-See ysco help output for its command-line flags.
-
 # Checking for updates
 
 Ysco periodically checks for updates, both of the monitored service, and of
@@ -49,15 +64,16 @@ ysco itself. By default, it will first look in GopherWatch.org DNS (low overhead
 only returns the latest version), and will fall back to querying the Go module
 proxy (higher overhead, returns all versions) in case of errors. The
 GopherWatch.org DNS is DNSSEC-protected, consider installing/using a
-DNSSEC-verifying resolver.
+DNSSEC-verifying resolver such as unbound.
 
 # Downloading binaries
 
-Ysco automatically retrieves a binary through the gobuild service.  Gobuild
-retrieves source code from the Go module proxy, verified through the Go sum
-database, and builds a binary for any Go toolchain/OS/architecture.  The hash of
-the binary is added to the gobuild transparency log (similar to the Go sum
-database), to build trust in its correct operation.
+Ysco automatically retrieves a binary through the gobuilds.org service
+(gobuild).  Gobuild retrieves source code from the Go module proxy, verified
+through the Go sum database, and builds a binary for any Go
+toolchain/OS/architecture.  The hash of the binary is added to the gobuild
+transparency log (similar to the Go sum database), to build trust in its
+correct operation.
 
 Gobuild only builds applications that can be cross-compiled deterministically
 (leading to the same bytes/hash) with only the Go toolchain, i.e. with
@@ -126,6 +142,10 @@ minor versions are discovered.
 # Usage "ysco"
 
 	usage: ysco run [flags] ...
+	       ysco init vcshub.example/mod/cmd/ex
+	       ysco config >example.conf
+	       ysco configdefaults >defaults.conf
+	       ysco testconfig < ys/ysco.conf
 	       ysco licenses
 	       ysco version
 
@@ -136,47 +156,117 @@ minor versions are discovered.
 	    	address to webserve admin and metrics interfaces; cannot be used together with adminaddr and metricsaddr
 	  -adminaddr string
 	    	if non-empty, address to serve only admin webserver; also see -addr; see -adminauthfile for requiring authentication
-	  -adminauthfile string
-	    	file containing line of form 'user:password' for use with http basic auth for the non-webhook endpoints; if not specified, no authentication is enforced.
-	  -cachedir string
-	    	cache directory with transparency log cache and update state files (default "yscocache")
-	  -gobuildverifier string
-	    	gobuild verifier key and optionally url (default "beta.gobuilds.org+3979319f+AReBl47t6/Zl24/pmarcKhJtsfAU2c1F5Wtu4hrOgOQQ")
+	  -dir string
+	    	directory with config file, state files and transparency log cache (default "ys")
 	  -groups string
 	    	comma-separated groups/gids to run command as, overriding additional groups of system user
-	  -loglevel value
-	    	loglevel, one of error, warn, info, debug (default INFO)
 	  -metricsaddr string
 	    	if non-empty, address to serve only metrics webserver; also see -addr
-	  -monitor string
-	    	mechanism to lookup new modules/toolchains, comma-separated, next method is attempted on failure, values: dns, goproxy (default "dns,goproxy")
-	  -monitordelay duration
-	    	time until starting to monitor for updates after startup (default 1m0s)
-	  -monitordns string
-	    	base hostname for gopherwatch dns module lookups (default "l.gopherwatch.org")
-	  -monitorgoproxy string
-	    	base url of a go module proxy for monitoring module updates through its list endpoint (default "https://proxy.golang.org/cached-only/")
-	  -monitorgoproxytoolchain string
-	    	if set, the go proxy base url to use for toolchain lookups
-	  -monitorinterval duration
-	    	interval between looking up modules to find updates (default 24h0m0s)
-	  -policyself string
-	    	policy for updating ysco: patch, minor, manual (default "patch")
-	  -policyselftoolchain string
-	    	policy for updating ysco: patch, minor, manual, supported, follow (default "follow")
-	  -policysvc string
-	    	policy for updating service: patch, minor, manual (default "patch")
-	  -policysvctoolchain string
-	    	policy for updating service: patch, minor, manual, supported, follow (default "follow")
-	  -updateall
-	    	update through all scheduled updates, not overwriting pending updates when a new version is discovered
-	  -updatedelay duration
-	    	delay between finding module update and updating (default 24h0m0s)
-	  -updatejitter duration
-	    	maximum random delay within the scheduled hour to delay (default 1h0m0s)
-	  -updateschedule value
-	    	schedule during which updates can be done: semicolon separated tokens with days and/or hours, each comma-separated of which each a single or dash-separated range; hours from 0-23, days from su-sa; examples: 'mo-fr 9-16' for during work days, 'mo-fr 18-22; sa,su 9-18' for workday evenings and weekends; updates are scheduled in the first available hour, taking backoff and jitter into account
 	  -user string
 	    	username/uid to run command as
+
+# Example config with defaults
+
+Built-in defaults that are used for missing/empty fields in the active
+configuration file. As generated by "ysco configdefaults":
+
+	# NOTE: Indenting in this config file can be done with tabs only, not spaces.
+	#
+	# Values 'debug', 'info', 'warn', 'error'. Default info.
+	LogLevel:
+
+	# Path to file with password to use for HTTP basic authentication (username is
+	# always 'admin').
+	AuthFile:
+
+	# Settings for how to check for updates. (optional)
+	Monitor:
+
+		# Methods to use for finding updates. First successful method is used. Values
+		# 'dns', 'goproxy'. If empty, 'dns' and 'goproxy' are used. (optional)
+		Methods:
+			- dns
+			- goproxy
+
+		# Gopherwatch DNS base hostname to use for looking up updates. If empty,
+		# l.gopherwatch.org is used. (optional)
+		DNS: l.gopherwatch.org
+
+		# Base URL for Go module proxy. If empty, https://proxy.golang.org/cached-only/ is
+		# used. (optional)
+		GoProxy: https://proxy.golang.org/cached-only/
+
+		# If set, Go module proxy base URL to use for finding updates of Go toolchains.
+		# (optional)
+		GoProxyToolchain:
+
+		# Wait time until first check for updates after starting up. (optional)
+		Delay: 1m0s
+
+		# Time between checks for updates. (optional)
+		Interval: 24h0m0s
+
+	# Policies for automated/manual updates. (optional)
+	Policy:
+
+		# Policy for updating when a new version of the monitored service is discovered.
+		# (optional)
+		Service: patch
+
+		# Policy for updating when a new version of ysco is discovered. (optional)
+		Self: patch
+
+		# Policy for updating the monitored service when a new Go toolchain is discovered.
+		# (optional)
+		ServiceToolchain: follow
+
+		# Policy for updating ysco when a new Go toolchain is discovered. (optional)
+		SelfToolchain: follow
+
+	# Settings for updating. (optional)
+	Update:
+
+		# Minimum wait time between discovery of update and rolling out the update.
+		# (optional)
+		Delay: 72h0m0s
+
+		# When to do updates, e.g. during working hours, or only evenings or weekends.
+		# Specified as a list of periods, each entry with days and/or hours (no minute
+		# precision) separated by a space. Days and days are comma-separated, with the
+		# values a single day or an inclusive range. Hours always have to be specified as
+		# a range. Example: 'tu-th,sa' (any hour on these days), or '18-21' (any day
+		# between 18h and 21h), or 'mo-fr 9-17'. Updates are scheduled in the first
+		# available hour, taking backoff and jitter into account. If empty, all days/hours
+		# are allowed. (optional)
+		Schedule:
+			-
+
+		# Max random time to wait for performing the update within the scheduled hour.
+		# (optional)
+		Jitter: 1h0m0s
+
+		# Cycle through all discovered updates instead of cancelling a pending update when
+		# another new update is discovered. (optional)
+		All: false
+
+	# Settings for the gobuilds.org service. (optional)
+	Gobuild:
+
+		# For verifying the gobuild transparency log.
+		VerifierKey: beta.gobuilds.org+3979319f+AReBl47t6/Zl24/pmarcKhJtsfAU2c1F5Wtu4hrOgOQQ
+
+		# Base URL for gobuild service. Derived from VerifierKey by default. (optional)
+		BaseURL:
+
+	# Links to show on admin page for convenience, e.g. to the service that is being
+	# run. (optional)
+	Links:
+		-
+
+			# Link shown on admin page, clickable.
+			URL:
+
+			# Text to show next to link. (optional)
+			Text:
 */
 package main

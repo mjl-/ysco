@@ -78,9 +78,9 @@ func writeScheduledTxt(l []Update) error {
 	return os.WriteFile(filepath.Join(cacheDir, "scheduled.txt"), b.Bytes(), 0600)
 }
 
-type Schedule []DayHour
+type Schedule []dayHour
 
-type DayHour struct {
+type dayHour struct {
 	Days  []time.Weekday
 	Hours []int
 }
@@ -117,66 +117,51 @@ func (s Schedule) Next(now time.Time) time.Time {
 	return first
 }
 
-func (sched *Schedule) UnmarshalText(buf []byte) (rerr error) {
-	s := string(buf)
-	var r Schedule
-	for _, dhs := range strings.Split(s, ";") {
-		dhs = strings.TrimSpace(dhs)
-		if dhs == "" {
-			return fmt.Errorf("empty day-hours")
-		}
-		t := strings.Split(dhs, " ")
-		if len(t) > 2 || t[0] == "" || (len(t) == 2 && t[1] == "") {
-			return fmt.Errorf("too many spaces in day-hours %q", dhs)
-		}
-
-		var err error
-
-		var days []time.Weekday
-		if !(t[0][0] >= '0' && t[0][0] <= '9') {
-			days, err = parseDays(t[0])
-			if err != nil {
-				return fmt.Errorf("parsing days: %v", err)
-			}
-			t = t[1:]
-		} else {
-			days = []time.Weekday{
-				time.Sunday,
-				time.Monday,
-				time.Tuesday,
-				time.Wednesday,
-				time.Thursday,
-				time.Friday,
-				time.Saturday,
-			}
-		}
-
-		var hours []int
-		if len(t) == 0 {
-			hours = make([]int, 24)
-			for i := 0; i < 24; i++ {
-				hours[i] = i
-			}
-		} else {
-
-			hours, err = parseHours(t[0])
-			if err != nil {
-				return fmt.Errorf("bad hours: %v", err)
-			}
-		}
-
-		r = append(r, DayHour{days, hours})
+func parseDayHour(s string) (dayHour, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return dayHour{}, fmt.Errorf("empty day-hours")
 	}
-	*sched = r
-	return nil
-}
-
-func (sched *Schedule) MarshalText() ([]byte, error) {
-	if len(*sched) == 0 {
-		return []byte(""), nil
+	t := strings.Split(s, " ")
+	if len(t) > 2 || t[0] == "" || (len(t) == 2 && t[1] == "") {
+		return dayHour{}, fmt.Errorf("too many spaces in day-hours %q", s)
 	}
-	// Not needed at the moment.
-	return nil, fmt.Errorf("marshal for non-zero schedule not implemented")
+
+	var err error
+
+	var days []time.Weekday
+	if !(t[0][0] >= '0' && t[0][0] <= '9') {
+		days, err = parseDays(t[0])
+		if err != nil {
+			return dayHour{}, fmt.Errorf("parsing days: %v", err)
+		}
+		t = t[1:]
+	} else {
+		days = []time.Weekday{
+			time.Sunday,
+			time.Monday,
+			time.Tuesday,
+			time.Wednesday,
+			time.Thursday,
+			time.Friday,
+			time.Saturday,
+		}
+	}
+
+	var hours []int
+	if len(t) == 0 {
+		hours = make([]int, 24)
+		for i := 0; i < 24; i++ {
+			hours[i] = i
+		}
+	} else {
+		hours, err = parseHours(t[0])
+		if err != nil {
+			return dayHour{}, fmt.Errorf("bad hours: %v", err)
+		}
+	}
+
+	return dayHour{days, hours}, nil
 }
 
 var weekdays = map[string]time.Weekday{
@@ -221,30 +206,26 @@ func parseDays(s string) (days []time.Weekday, rerr error) {
 func parseHours(s string) (hours []int, rerr error) {
 	for _, e := range strings.Split(s, ",") {
 		t := strings.Split(e, "-")
-		if len(t) > 2 {
-			return nil, fmt.Errorf("too many dashes in %q", e)
+		if len(t) != 2 {
+			return nil, fmt.Errorf("need two dashes for hours in %q", e)
 		}
 		start, err := strconv.ParseUint(t[0], 10, 32)
-		if err == nil && start >= 24 {
-			err = fmt.Errorf("hour must be between 0 and 23")
+		if err == nil && start > 23 {
+			err = fmt.Errorf("start hour must be between 0 and 23")
 		}
 		if err != nil {
 			return nil, fmt.Errorf("parsing hour %q: %v", t[0], err)
 		}
-		if len(t) == 1 {
-			hours = append(hours, int(start))
-			continue
-		}
 		end, err := strconv.ParseUint(t[1], 10, 32)
-		if err == nil && end >= 24 {
-			err = fmt.Errorf("hour must be between 0 and 23")
+		if err == nil && end > 24 {
+			err = fmt.Errorf("end hour must be between 0 and 24")
 		} else if err == nil && end <= start {
-			err = fmt.Errorf("for hour range, end must be larger than start")
+			err = fmt.Errorf("for hour range, end must be > than start")
 		}
 		if err != nil {
 			return nil, fmt.Errorf("parsing hour %q: %v", t[1], err)
 		}
-		for ; start <= end; start++ {
+		for ; start < end; start++ {
 			hours = append(hours, int(start))
 		}
 	}

@@ -13,18 +13,18 @@ func lookupToolchainVersions(log *slog.Logger) (rtc Toolchains, rerr error) {
 	}()
 
 	err := fmt.Errorf("no monitor mechanisms")
-	for _, m := range monitorParsed {
+	for _, m := range fallbackList(config.Monitor.Methods, defaults.Monitor.Methods) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
 		var tc Toolchains
 		switch m {
-		case "dns":
-			tc, err = LookupToolchains(ctx, monitorDNS)
-		case "goproxy":
-			goproxy := monitorGoProxy
-			if monitorGoProxyToolchain != "" {
-				goproxy = monitorGoProxyToolchain
+		case MonitorDNS:
+			tc, err = LookupToolchains(ctx, fallback(config.Monitor.DNS, defaults.Monitor.DNS))
+		case MonitorGoProxy:
+			goproxy := fallback(config.Monitor.GoProxyToolchain, defaults.Monitor.GoProxyToolchain)
+			if goproxy == "" {
+				goproxy = fallback(config.Monitor.GoProxy, defaults.Monitor.GoProxy)
 			}
 			tc, err = lookupToolchainVersionGoProxy(ctx, goproxy)
 		default:
@@ -45,16 +45,16 @@ func lookupModuleVersions(log *slog.Logger, modpath string) (rversions []Version
 	}()
 
 	err := fmt.Errorf("no monitor mechanisms")
-	for _, m := range monitorParsed {
+	for _, m := range fallbackList(config.Monitor.Methods, defaults.Monitor.Methods) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
 		var versions []Version
 		switch m {
-		case "dns":
-			versions, err = LookupModule(ctx, monitorDNS, modpath)
-		case "goproxy":
-			versions, err = lookupModuleVersionsGoProxy(ctx, monitorGoProxy, modpath)
+		case MonitorDNS:
+			versions, err = LookupModule(ctx, fallback(config.Monitor.DNS, defaults.Monitor.DNS), modpath)
+		case MonitorGoProxy:
+			versions, err = lookupModuleVersionsGoProxy(ctx, fallback(config.Monitor.GoProxy, defaults.Monitor.GoProxy), modpath)
 		default:
 			return nil, fmt.Errorf("unknown monitor mechanism %q", m)
 		}

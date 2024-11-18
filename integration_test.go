@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -14,6 +15,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/mjl-/sconf"
 )
 
 func urlValues(args ...string) url.Values {
@@ -41,13 +44,42 @@ func TestIntegration(t *testing.T) {
 		}
 	}
 
+	err := os.Mkdir("ys", 0700)
+	tcheck(err, "mkdir ys")
+
+	config := Config{
+		LogLevel: "debug",
+		AuthFile: "ys/password.txt",
+		Monitor: ConfigMonitor{
+			Methods:          []MonitorMethod{MonitorGoProxy},
+			GoProxy:          "http://goproxy:2080",
+			GoProxyToolchain: "https://proxy.golang.org/cached-only/",
+			Delay:            3 * time.Second,
+		},
+		Update: ConfigUpdate{
+			Delay:  time.Hour,
+			Jitter: 3 * time.Second,
+		},
+		Gobuild: ConfigGobuild{
+			VerifierKey: "localhost+7f833345+ARbs+7AvMjM6pK7XBKzOYcR4Ko6TXOO0TvTxBnYHKgJi",
+			BaseURL:     "http://gobuild:4080/tlog",
+		},
+	}
+	var b bytes.Buffer
+	err = sconf.Write(&b, config)
+	tcheck(err, "generate config")
+	err = os.WriteFile("ys/ysco.conf", b.Bytes(), 0600)
+	tcheck(err, "write config")
+	err = os.WriteFile("ys/password.txt", []byte("test1234\n"), 0600)
+	tcheck(err, "write password.txt")
+
 	fmt.Println("# Starting ysco")
-	cmd := exec.Command("sh", "-c", "./ysco run -user 1000 -groups 1000 -updatedelay 1h -monitor goproxy -cachedir /tmp/yscocache -adminauthfile /tmp/yscocache/userpass.txt -loglevel debug -policysvc patch -policysvctoolchain follow -updatejitter 3s -adminaddr 127.0.0.1:8523 -metricsaddr 127.0.0.1:8524 -monitorgoproxy http://goproxy:2080 -monitorgoproxytoolchain https://proxy.golang.org/cached-only/ -monitordelay 3s -gobuildverifier 'localhost+7f833345+ARbs+7AvMjM6pK7XBKzOYcR4Ko6TXOO0TvTxBnYHKgJi http://gobuild:4080/tlog' ./moxtools")
+	cmd := exec.Command("sh", "-c", "./ysco-v0.9.9 run -user 1000 -groups 1000 -addr 127.0.0.1:8523 ./moxtools")
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	err := cmd.Start()
+	err = cmd.Start()
 	tcheck(err, "start ysco")
 
 	defer func() {

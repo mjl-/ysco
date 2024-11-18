@@ -8,6 +8,10 @@ github.com/klauspost/compress v1.17.9 h1:6KIumPrER1LHsvBVuDa0r5xaG0Es51mhhB9BQB2
 github.com/klauspost/compress v1.17.9/go.mod h1:Di0epgTjJY877eYKx5yC51cX2A2Vl2ibi7bDH9ttBbw=
 github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
+github.com/mjl-/sconf v0.0.8 h1:xmTVjp+9rvKEpItYF+Mi6yt56F5z2VtBqqgOk6JnuRc=
+github.com/mjl-/sconf v0.0.8/go.mod h1:uF8OdWtLT8La3i4ln176i1pB0ps9pXGCaABEU55ZkE0=
+github.com/mjl-/xfmt v0.0.2 h1:6dLgd6U3bmDJKtTxsaSYYyMaORoO4hKBAJo4XKkPRko=
+github.com/mjl-/xfmt v0.0.2/go.mod h1:DIEOLmETMQHHr4OgwPG7iC37rDiN9MaZIZxNm5hBtL8=
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 h1:C3w9PqII01/Oq1c1nUAm88MOHcQC9l5mIlSMApZMrHA=
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822/go.mod h1:+n7T8mK8HuQTcFwEeznm/DIxMOiR9yIdICNftLE1DvQ=
 github.com/prometheus/client_golang v1.20.4 h1:Tgh3Yr67PaOv/uTqloMsCEdeuFTatm5zIq5+qNN23vI=

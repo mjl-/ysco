@@ -17,6 +17,8 @@ import (
 	"strings"
 
 	"golang.org/x/mod/semver"
+
+	"github.com/mjl-/sconf"
 )
 
 //go:embed "favicon.ico"
@@ -89,9 +91,13 @@ type indexArgs struct {
 	GoVersionsError   string
 	GoVersions        []string
 	Argv              []string
+	ConfigPath        string
+	ConfigContents    string
+	ConfigExample     string
+	Links             []Link
 }
 
-func gatherIndexArgs() indexArgs {
+func gatherIndexArgs() (indexArgs, error) {
 	schedule.Lock()
 	scheduled := append([]Update{}, schedule.updates...)
 	schedule.Unlock()
@@ -153,6 +159,18 @@ func gatherIndexArgs() indexArgs {
 		goversions = append(goversions, tc.Next)
 	}
 
+	configPath := filepath.Join(ysDir, "ysco.conf")
+	configContents, err := os.ReadFile(configPath)
+	if err != nil {
+		return indexArgs{}, err
+	}
+
+	var b bytes.Buffer
+	if err := sconf.Describe(&b, defaults); err != nil {
+		return indexArgs{}, fmt.Errorf("describing config file with defaults: %v", err)
+	}
+	configDefaults := b.String()
+
 	return indexArgs{
 		svcinfo.Main.Path,
 		packageDir(svcinfo),
@@ -174,22 +192,35 @@ func gatherIndexArgs() indexArgs {
 		goversionsError,
 		goversions,
 		os.Args,
-	}
+		configPath,
+		string(configContents),
+		configDefaults,
+		config.Links,
+	}, nil
 }
 
 func handleFavicon(w http.ResponseWriter, r *http.Request) {
 	http.ServeFileFS(w, r, faviconIco, "favicon.ico")
 }
 
+func authOK(r *http.Request) bool {
+	user, pass, ok := r.BasicAuth()
+	return ok && user == "admin" && pass == config.adminPassword
+}
+
 func handleJSONGet(w http.ResponseWriter, r *http.Request) {
-	authok := adminAuth == "" || r.Header.Get("Authorization") == adminAuth
-	if !authok {
+	if !authOK(r) {
 		w.Header().Set("WWW-Authenticate", "Basic")
 		httpErrorf(w, r, http.StatusUnauthorized, "bad/missing credentials")
 		return
 	}
 
-	buf, err := json.Marshal(gatherIndexArgs())
+	args, err := gatherIndexArgs()
+	if err != nil {
+		httpErrorf(w, r, http.StatusInternalServerError, "gather config/state: %v", err)
+		return
+	}
+	buf, err := json.Marshal(args)
 	if err != nil {
 		httpErrorf(w, r, http.StatusInternalServerError, "marshal json: %v", err)
 		return
@@ -200,16 +231,20 @@ func handleJSONGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleIndexGet(w http.ResponseWriter, r *http.Request) {
-	authok := adminAuth == "" || r.Header.Get("Authorization") == adminAuth
-	if !authok {
+	if !authOK(r) {
 		w.Header().Set("WWW-Authenticate", "Basic")
 		httpErrorf(w, r, http.StatusUnauthorized, "bad/missing credentials")
 		return
 	}
 
+	args, err := gatherIndexArgs()
+	if err != nil {
+		httpErrorf(w, r, http.StatusInternalServerError, "gather template params: %v", err)
+		return
+	}
+
 	var b bytes.Buffer
-	if err := indextempl.Execute(&b, gatherIndexArgs()); err != nil {
-		slog.Error("execute template", "err", err)
+	if err := indextempl.Execute(&b, args); err != nil {
 		httpErrorf(w, r, http.StatusInternalServerError, "executing template: %v", err)
 		return
 	}
@@ -219,8 +254,7 @@ func handleIndexGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleIndexPost(w http.ResponseWriter, r *http.Request) {
-	authok := adminAuth == "" || r.Header.Get("Authorization") == adminAuth
-	if !authok {
+	if !authOK(r) {
 		w.Header().Set("WWW-Authenticate", "Basic")
 		httpErrorf(w, r, http.StatusUnauthorized, "bad/missing credentials")
 		return
@@ -295,6 +329,60 @@ func handleIndexPost(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+	case "saveconfig":
+		config := strings.ReplaceAll(r.FormValue("config"), "\r\n", "\n")
+		var cfg Config
+		if err := parseConfigReader(strings.NewReader(config), &cfg); err != nil {
+			httpErrorf(w, r, http.StatusBadRequest, "parsing new config: %v", err)
+			return
+		}
+
+		// We hold the lock until execSelf.
+		updating.Lock()
+		busy := updating.busy
+		defer updating.Unlock()
+		if busy {
+			httpErrorf(w, r, http.StatusBadRequest, "updating in progress, cannot reload")
+			return
+		}
+
+		// We take a simple approach: Just overwrite the config file (and sync it to disk),
+		// and exec ourselves to get the new config loaded. We could also update it in
+		// place in the running process, but it would require proper locking.
+
+		p := filepath.Join(ysDir, "ysco.conf")
+		if err := os.WriteFile(p, []byte(config), 0600); err != nil {
+			httpErrorf(w, r, http.StatusInternalServerError, "writing new config file: %v", err)
+			return
+		}
+		f, err := os.Open(p)
+		if err != nil {
+			httpErrorf(w, r, http.StatusInternalServerError, "open file for fsync after write: %v", err)
+			return
+		}
+		if err := f.Sync(); err != nil {
+			slog.Error("sync config file after writing", "err", err)
+		}
+		if err := f.Close(); err != nil {
+			slog.Error("closing config file after sync", "err", err)
+		}
+		d, err := os.Open(ysDir)
+		if err != nil {
+			slog.Error("open ys dir after writing config file for sync", "err", err)
+		} else {
+			if err := d.Sync(); err != nil {
+				slog.Error("sync ys dir after writing config file")
+			}
+			if err := d.Close(); err != nil {
+				slog.Error("close ys dir after syncing after writing config file")
+			}
+		}
+
+		// If successful, execSelf does not return.
+		err = execSelf(true, w, true)
+		httpErrorf(w, r, http.StatusInternalServerError, "reloading after config change: %v", err)
+		return
+
 	default:
 		httpErrorf(w, r, http.StatusBadRequest, "unknown command %q", cmd)
 		return
@@ -308,7 +396,7 @@ func handleNotify(w http.ResponseWriter, r *http.Request) {
 	slog.Debug("notification for module update")
 	w.Header().Set("Content-Type", "text/plain")
 	w.Write([]byte("ok"))
-	if policySvc == "manual" && policySelf == "manual" {
+	if fallback(config.Policy.Service, defaults.Policy.Service) == VersionManual && fallback(config.Policy.Self, defaults.Policy.Self) == VersionManual {
 		return
 	}
 	// In background, we want to return immediately since this is a webhook.
@@ -320,7 +408,7 @@ func handleNotifyToolchain(w http.ResponseWriter, r *http.Request) {
 	slog.Debug("notification for toolchain update")
 	w.Header().Set("Content-Type", "text/plain")
 	w.Write([]byte("ok"))
-	if policySvcToolchain == "manual" && policySelfToolchain == "manual" {
+	if fallback(config.Policy.ServiceToolchain, defaults.Policy.ServiceToolchain) == GoVersionManual && fallback(config.Policy.SelfToolchain, defaults.Policy.SelfToolchain) == GoVersionManual {
 		return
 	}
 	// In background, we want to return immediately since this is a webhook.
@@ -331,7 +419,7 @@ func handleUpdate(w http.ResponseWriter, r *http.Request) {
 	which := Which(r.FormValue("which"))
 	version := r.FormValue("version")
 	goversion := r.FormValue("goversion")
-	authok := adminAuth == "" || r.Header.Get("Authorization") == adminAuth
+	authok := authOK(r)
 	slog.Debug("update request", "which", which, "version", version, "goversion", goversion, "authok", authok)
 
 	if !authok {

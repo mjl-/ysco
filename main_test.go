@@ -11,7 +11,7 @@ func TestPolicyPickVersion(t *testing.T) {
 
 	test := func(pol, poltc string, tc Toolchains, vers Version, govers string, versions []Version, expVers Version, expGovers string, expUpdate, expFoundMajor bool) {
 		t.Helper()
-		nvers, ngovers, update, foundMajor := policyPickVersion(log, pol, poltc, tc, vers, govers, govers, versions)
+		nvers, ngovers, update, foundMajor := policyPickVersion(log, VersionPolicy(pol), GoVersionPolicy(poltc), tc, vers, govers, govers, versions)
 		if nvers != expVers || ngovers != expGovers || update != expUpdate || foundMajor != expFoundMajor {
 			t.Fatalf("got %v %v %v %v, expected %v %v %v %v", nvers, ngovers, update, foundMajor, expVers, expGovers, expUpdate, expFoundMajor)
 		}

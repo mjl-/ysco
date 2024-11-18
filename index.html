@@ -4,9 +4,10 @@
 		<meta charset="utf-8" />
 		<title>Ysco - {{ .SvcModPath }} {{ .SvcPkgDir }} {{ .SvcVersion }} {{ .SvcGoVersion }}</title>
 		<style>
-* { font-family: sans-serif; margin: 0; padding: 0; font-size: 1em; }
+* { font-family: "Ubuntu", sans-serif; margin: 0; padding: 0; font-size: 1em; }
+pre { font-family: "Ubuntu Mono", monospace; }
 body { padding: 1em; }
-h1, h2 { margin-top: 2ex; margin-bottom: 1ex; }
+h1, h2, h3 { margin-top: 2ex; margin-bottom: 1ex; }
 h1 { font-size: 1.4em; }
 h2 { font-size: 1.2em; }
 h3 { font-size: 1em; }
@@ -83,8 +84,7 @@ th, td { padding: .2em .1em; }
 		<p>No updates scheduled.</p>
 	{{ end }}
 
-		<h2>Available versions for service</h2>
-		<p>Current: {{ .SvcModPath }} {{ .SvcPkgDir }} {{ .SvcVersion }} {{ .SvcGoVersion }}</p>
+		<h2>Service: {{ .SvcModPath }} {{ .SvcPkgDir }} "{{ .SvcVersion }}" {{ .SvcGoVersion }}</h2>
 		<form method="POST">
 			<input type="hidden" name="command" value="update" />
 			<input type="hidden" name="which" value="svc" />
@@ -136,8 +136,7 @@ th, td { padding: .2em .1em; }
 			</div>
 		</form>
 
-		<h2>Available versions for ysco</h2>
-		<p>Current: {{ .SelfModPath }} {{ .SelfPkgDir }} {{ .SelfVersion }} {{ .SelfGoVersion }}</p>
+		<h2>Ysco: {{ .SelfModPath }} {{ .SelfPkgDir }} "{{ .SelfVersion }}" {{ .SelfGoVersion }}</h2>
 		<form method="POST">
 			<input type="hidden" name="command" value="update" />
 			<input type="hidden" name="which" value="self" />
@@ -190,6 +189,17 @@ th, td { padding: .2em .1em; }
 			</div>
 		</form>
 
+		<h2>Links</h2>
+{{ if not .Links }}
+		<p>No links.</p>
+{{ else }}
+		<ul>
+	{{ range $link := .Links }}
+			<li><a href="{{ $link.URL }}">{{ $link.URL }}</a> {{ $link.Text }}</li>
+	{{ end }}
+		</ul>
+{{ end }}
+
 		<h2>Old binaries</h2>
 	{{ if and (not .OldBinariesSelf) (not .OldBinariesSvc) }}
 		<p>No old binaries scheduled for cleanup.</p>
@@ -207,5 +217,20 @@ th, td { padding: .2em .1em; }
 
 		<h2>Configuration</h2>
 		<p>Started as: {{ .Argv }}</p>
+
+		<h3>Config file</h3>
+		<div>
+			<form method="POST">
+				<input type="hidden" name="command" value="saveconfig" />
+				<div style="max-width: 60em; margin: 1ex 0">
+					<textarea name="config" rows="20" style="width: 100%">{{ .ConfigContents }}</textarea>
+				</div>
+				<button>Save configuration and reload</button>
+			</form>
+		</div>
+
+		<h3>Configuration defaults</h3>
+		<p>For absent/empty fields in the configuration file, the defaults are used.</p>
+		<pre style="border: 1px solid #ddd; background-color: #eee; padding: .5em; display: inline-block">{{ .ConfigExample }}</pre>
 	</body>
 </html>

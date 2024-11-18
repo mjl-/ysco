@@ -20,7 +20,7 @@ import (
 )
 
 type clientOps struct {
-	localDir  string // e.g. yscocache/gobuildverifier/beta.gobuilds.org, for config and cache subdirs.
+	localDir  string // e.g. ys/gobuildverifiercache/beta.gobuilds.org, for config and cache subdirs.
 	baseURL   string // e.g. https://beta.gobuilds.org/tlog
 	dlBaseURL string // e.g. https://beta.gobuilds.org
 }
