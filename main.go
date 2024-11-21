@@ -92,8 +92,15 @@ type Config struct {
 	Update   ConfigUpdate  `sconf:"optional" sconf-doc:"Settings for updating."`
 	Gobuild  ConfigGobuild `sconf:"optional" sconf-doc:"Settings for the gobuilds.org service."`
 	Links    []Link        `sconf:"optional" sconf-doc:"Links to show on admin page for convenience, e.g. to the service that is being run."`
+	Process  ConfigProcess `sconf:"optional" sconf-doc:"Additional configuration for the service process."`
 
 	adminPassword string // Read from AuthFile
+}
+
+type ConfigProcess struct {
+	AmbientCapabilities []string `sconf:"optional" sconf-doc:"Capabilities to preserve in the service process, either by name or number, e.g. CAP_NET_BIND_SERVICE or 0xa. During fork and exec that sets a new user/group id, capabilities are dropped by default."`
+
+	ambientCaps []uintptr // parsed form of AmbientCapabilities.
 }
 
 type MonitorMethod string
@@ -665,6 +672,21 @@ func parseConfigReader(r io.Reader, c *Config) error {
 		if _, err := url.Parse(c.Gobuild.BaseURL); err != nil {
 			return fmt.Errorf("invalid gobuild base url %q: %v", c.Gobuild.BaseURL, err)
 		}
+	}
+
+	if len(c.Process.AmbientCapabilities) > 0 && runtime.GOOS != "linux" {
+		return fmt.Errorf("capabilities only available on linux")
+	}
+	for _, s := range c.Process.AmbientCapabilities {
+		cp, ok := capabilities[s]
+		if !ok {
+			v, err := strconv.ParseUint(s, 0, 64)
+			if err != nil {
+				return fmt.Errorf("unknown capability %q, and not a number", s)
+			}
+			cp = uintptr(v)
+		}
+		c.Process.ambientCaps = append(c.Process.ambientCaps, cp)
 	}
 
 	return nil
@@ -1269,7 +1291,8 @@ func startProcess() {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
+		Setpgid:     true,
+		AmbientCaps: config.Process.ambientCaps,
 	}
 	if username != "" {
 		cmd.SysProcAttr.Credential = &syscall.Credential{

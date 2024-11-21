@@ -2,6 +2,7 @@ build:
 	CGO_ENABLED=0 go build
 	./genlicenses.sh
 	./gendoc.sh
+	./gencapmap.sh
 	CGO_ENABLED=0 go build
 	CGO_ENABLED=0 go vet
 	CGO_ENABLED=0 go vet -tags integration
