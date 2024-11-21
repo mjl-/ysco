@@ -37,18 +37,34 @@ groups:
     annotations:
       summary: automatic updates are paused after an update, manual intervention required
 
-  - alert: ysco-self-update-available
-    expr: ysco_self_update_available > 0
-    for: 3d
+  - alert: ysco-self-newer-goversion-available
+    expr: ysco_self_newer_goversion_available > 0
+    for: 4d
     labels:
       page: email
     annotations:
-      summary: update for ysco itself has been available for 3 days
+      summary: new goversion for ysco has been available for 4 days
 
-  - alert: ysco-service-update-available
-    expr: ysco_service_update_available > 0
-    for: 3d
+  - alert: ysco-service-newer-goversion-available
+    expr: ysco_service_newer_goversion_available > 0
+    for: 4d
     labels:
       page: email
     annotations:
-      summary: update for service has been available for 3 days
+      summary: new goversion for service has been available for 4 days
+
+  - alert: ysco-self-newer-version-available
+    expr: ysco_self_newer_version_available > 0
+    for: 4d
+    labels:
+      page: email
+    annotations:
+      summary: new version for ysco has been available for 4 days
+
+  - alert: ysco-service-newer-version-available
+    expr: ysco_service_newer_version_available > 0
+    for: 4d
+    labels:
+      page: email
+    annotations:
+      summary: new version for service has been available for 4 days
