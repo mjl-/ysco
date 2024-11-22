@@ -3,3 +3,6 @@
 /cover.*
 /testdata/sdk/
 /local/
+/testdata/*-go/pkg/
+/testdata/gocache/*
+/testdata/gocache-root/*

@@ -1,5 +1,8 @@
 #!/bin/sh
-set -ex
+set -x
+# Remove stale versions of git.local from previous test runs.
+rm -r /go/pkg/mod/git.local /go/pkg/mod/cache/download/git.local /go/pkg/mod/cache/vcs
+set -e
 
 cd /tmp
 export HOME=/tmp

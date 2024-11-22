@@ -19,6 +19,7 @@ test-integration:
 	-docker-compose down
 	docker-compose build
 	docker-compose run test
+	docker-compose down -t1
 
 run:
 	# -updateschedule mo 

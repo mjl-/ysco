@@ -27,7 +27,7 @@ func urlValues(args ...string) url.Values {
 	return uv
 }
 
-// Start ysco, running moxtools, in the background. We will talk to it over HTTP,
+// Start ysco, running webserver, in the background. We will talk to it over HTTP,
 // making it update, and discover new updates.
 func TestIntegration(t *testing.T) {
 	tcheck := func(err error, msg string) {
@@ -74,7 +74,7 @@ func TestIntegration(t *testing.T) {
 	tcheck(err, "write password.txt")
 
 	fmt.Println("# Starting ysco")
-	cmd := exec.Command("sh", "-c", "./ysco-v0.9.9 run -user 1000 -groups 1000 -addr 127.0.0.1:8523 ./moxtools")
+	cmd := exec.Command("sh", "-c", "./ysco-v0.9.9 run -user 1000 -groups 1000 -addr 127.0.0.1:8523 ./webserver")
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

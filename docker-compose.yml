@@ -15,6 +15,10 @@ services:
     volumes:
       - ./testdata:/testdata
       - ./.git:/testdata/git
+      - ./testdata/test-go:/go
+      - ./testdata/gocache-root:/gocache
+    environment:
+      GOCACHE: /gocache
     depends_on:
       gobuild:
         condition: service_healthy
@@ -26,7 +30,10 @@ services:
     user: 1000:1000
     volumes:
       - ./testdata:/testdata
-      - ./.git:/testdata/git
+      - ./.git:/testdata/ysco.git
+      - ./testdata/gocache:/gocache
+    environment:
+      GOCACHE: /gocache
     ports:
       - 1080:80
       - 1443:443
@@ -48,6 +55,11 @@ services:
     user: 1000:1000
     volumes:
       - ./testdata:/testdata
+      # Cache downloaded modules, goproxy.sh removes previous files from git.local.
+      - ./testdata/goproxy-go:/go
+      - ./testdata/gocache:/gocache
+    environment:
+      GOCACHE: /gocache
     ports:
       - 2080:2080
     depends_on:
@@ -66,6 +78,11 @@ services:
     user: 1000:1000
     volumes:
       - ./testdata:/testdata
+      # Keep the go directory around for reusing downloaded modules.
+      - ./testdata/xgosumdb-go:/go
+      - ./testdata/gocache:/gocache
+    environment:
+      GOCACHE: /gocache
     ports:
       - 3080:3080
     depends_on:
@@ -85,6 +102,11 @@ services:
     volumes:
       - ./testdata:/testdata
       - ./testdata/sdk:/testdata/sdk
+      # Keep the go directory around for reusing downloaded modules.
+      - ./testdata/gobuild-go:/go
+      - ./testdata/gocache:/gocache
+    environment:
+      GOCACHE: /gocache
     ports:
       - 4080:4080
     depends_on:

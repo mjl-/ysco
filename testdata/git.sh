@@ -13,7 +13,9 @@ git config --global user.email "git@localhost"
 git config --global user.name "git"
 
 # Basic static file webserver.
-cat >/tmp/webserver.go <<EOF
+mkdir -p /tmp/web/webserver
+cd /tmp/web/webserver
+cat >main.go <<EOF
 package main
 
 import (
@@ -35,7 +37,7 @@ func main() {
 
 	handler := http.FileServer(http.Dir("."))
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("%s\n", r.URL)
+		log.Printf("%s", r.URL)
 		w.Header().Set("Cache-Control", "max-age=0")
 		handler.ServeHTTP(w, r)
 	})
@@ -47,12 +49,28 @@ func main() {
 	}
 }
 EOF
+cat >go.mod <<EOF
+module git.local/webserver
+
+go 1.22
+EOF
+git init
+git add main.go go.mod
+git commit -m 'webserver'
+git tag -a v0.0.4 -m v0.0.4
+git tag -a v0.0.5 -m v0.0.5
+git update-server-info
+cat >index.html<<EOF
+<html><head>
+<meta name="go-import" content="git.local/webserver git https://git.local/webserver/.git" />
+</head><body>index for webserver, for go-import meta</body></html>
+EOF
+
 
 # Clone ysco git repo, modify the module path from github to git.local/ysco,
 # add tags for use in tests.
-mkdir /tmp/gitroot
-git clone /testdata/git /tmp/gitroot/ysco
-cd /tmp/gitroot/ysco
+git clone /testdata/ysco.git /tmp/web/ysco
+cd /tmp/web/ysco
 sed -i s,github.com/mjl-/ysco,git.local/ysco,g go.mod *.go
 git diff
 git commit --amend -m test go.mod *.go
@@ -67,6 +85,6 @@ cat >index.html<<EOF
 EOF
 
 # Start https server with self-signed cert.
-cd /tmp/gitroot
+cd /tmp/web
 # go run /tmp/webserver.go -listen :80 & # For debugging.
-go run /tmp/webserver.go -key /testdata/key.pem -cert /testdata/cert.pem -listen :443
+go run /tmp/web/webserver/main.go -key /testdata/key.pem -cert /testdata/cert.pem -listen :443
