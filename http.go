@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strings"
 
 	"golang.org/x/mod/semver"
@@ -35,6 +36,10 @@ var indextempl = htmltemplate.Must(htmltemplate.New("index.html").Funcs(htmltemp
 // release notes, but may also be an incorrect url.
 func tagURL(modpath, version string) string {
 	var repoURL, tagURL string
+
+	if semver.Prerelease(version) != "" {
+		return ""
+	}
 
 	// Based on code from github.com/mjl-/gopherwatch, compose.go.
 	t := strings.Split(modpath, "/")
@@ -126,7 +131,7 @@ func gatherIndexArgs() (indexArgs, error) {
 	for _, v := range l {
 		svcversions = append(svcversions, v.Full)
 	}
-	if len(svcversions) == 0 && (svcinfo.Main.Version != "" && svcinfo.Main.Version != "(devel)") {
+	if svcinfo.Main.Version != "" && svcinfo.Main.Version != "(devel)" && !slices.Contains(svcversions, svcinfo.Main.Version) {
 		svcversions = append(svcversions, svcinfo.Main.Version)
 	}
 
@@ -139,7 +144,7 @@ func gatherIndexArgs() (indexArgs, error) {
 	for _, v := range l {
 		selfversions = append(selfversions, v.Full)
 	}
-	if len(selfversions) == 0 && (selfinfo.Main.Version != "" && selfinfo.Main.Version != "(devel)") {
+	if selfinfo.Main.Version != "" && selfinfo.Main.Version != "(devel)" && !slices.Contains(selfversions, selfinfo.Main.Version) {
 		selfversions = append(selfversions, selfinfo.Main.Version)
 	}
 
