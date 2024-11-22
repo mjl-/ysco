@@ -1290,10 +1290,7 @@ func startProcess() {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid:     true,
-		AmbientCaps: config.Process.ambientCaps,
-	}
+	cmd.SysProcAttr = sysProcAttr()
 	if username != "" {
 		cmd.SysProcAttr.Credential = &syscall.Credential{
 			Uid:    userID,
