@@ -3,7 +3,6 @@
 
 # todo: could add a container with dns, and a container with gopherwatch, and do monitor requests through them (dns delegating to gopherwatch).
 
-version: '3.7'
 services:
   # We run integration_test.go from this container. It starts ysco, then makes HTTP
   # calls to make it update, let it discover new versions.
@@ -13,10 +12,10 @@ services:
     # note: runs as root, ysco starts its service as uid 1000
     command: ["/testdata/test.sh"]
     volumes:
-      - ./testdata:/testdata
-      - ./.git:/testdata/git
-      - ./testdata/test-go:/go
-      - ./testdata/gocache-root:/gocache
+      - ./testdata:/testdata:z
+      - ./.git:/testdata/git:z
+      - ./testdata/test-go:/go:z
+      - ./testdata/gocache-root:/gocache:z
     environment:
       GOCACHE: /gocache
     depends_on:
@@ -29,9 +28,9 @@ services:
     command: ["/testdata/git.sh"]
     user: 1000:1000
     volumes:
-      - ./testdata:/testdata
-      - ./.git:/testdata/ysco.git
-      - ./testdata/gocache:/gocache
+      - ./testdata:/testdata:z
+      - ./.git:/testdata/ysco.git:z
+      - ./testdata/gocache:/gocache:z
     environment:
       GOCACHE: /gocache
     ports:
@@ -54,10 +53,10 @@ services:
     command: ["/testdata/goproxy.sh"]
     user: 1000:1000
     volumes:
-      - ./testdata:/testdata
+      - ./testdata:/testdata:z
       # Cache downloaded modules, goproxy.sh removes previous files from git.local.
-      - ./testdata/goproxy-go:/go
-      - ./testdata/gocache:/gocache
+      - ./testdata/goproxy-go:/go:z
+      - ./testdata/gocache:/gocache:z
     environment:
       GOCACHE: /gocache
     ports:
@@ -77,10 +76,10 @@ services:
     command: ["/testdata/xgosumdb.sh"]
     user: 1000:1000
     volumes:
-      - ./testdata:/testdata
+      - ./testdata:/testdata:z
       # Keep the go directory around for reusing downloaded modules.
-      - ./testdata/xgosumdb-go:/go
-      - ./testdata/gocache:/gocache
+      - ./testdata/xgosumdb-go:/go:z
+      - ./testdata/gocache:/gocache:z
     environment:
       GOCACHE: /gocache
     ports:
@@ -100,11 +99,11 @@ services:
     user: 1000:1000
     command: ["/testdata/gobuild.sh"]
     volumes:
-      - ./testdata:/testdata
-      - ./testdata/sdk:/testdata/sdk
+      - ./testdata:/testdata:z
+      - ./testdata/sdk:/testdata/sdk:z
       # Keep the go directory around for reusing downloaded modules.
-      - ./testdata/gobuild-go:/go
-      - ./testdata/gocache:/gocache
+      - ./testdata/gobuild-go:/go:z
+      - ./testdata/gocache:/gocache:z
     environment:
       GOCACHE: /gocache
     ports:
