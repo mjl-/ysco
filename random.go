@@ -19,7 +19,7 @@ func newChaCha8Rand() *mathrand.Rand {
 func genrandom() string {
 	var r string
 	const chars = "abcdefghijklmnopqrstuwvxyzABCDEFGHIJKLMNOPQRSTUWVXYZ0123456789"
-	for i := 0; i < 12; i++ {
+	for range 12 {
 		r += string(chars[secretRand.IntN(len(chars))])
 	}
 	return r

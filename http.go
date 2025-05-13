@@ -405,7 +405,7 @@ func handleNotify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// In background, we want to return immediately since this is a webhook.
-	monitort.Reset(0)
+	monitorTimer.Reset(0)
 }
 
 func handleNotifyToolchain(w http.ResponseWriter, r *http.Request) {
@@ -417,7 +417,7 @@ func handleNotifyToolchain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// In background, we want to return immediately since this is a webhook.
-	monitort.Reset(0)
+	monitorTimer.Reset(0)
 }
 
 func handleUpdate(w http.ResponseWriter, r *http.Request) {

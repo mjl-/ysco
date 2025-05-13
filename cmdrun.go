@@ -98,11 +98,11 @@ var updating struct {
 	// failure to update. Cleared after successful (e.g. manual) update.
 	pauseReason string
 
-	// Current service & self bulid info, read from files.
+	// Current service & self build info, read from files.
 	svcinfo  *debug.BuildInfo
 	selfinfo *debug.BuildInfo
 
-	// Of previous binary, after update, for rollback.
+	// Of previous binary, set when doing an update, for rollback.
 	svcinfoPrev    *debug.BuildInfo
 	binaryPathPrev string
 }
@@ -136,7 +136,7 @@ var oldBinaries struct {
 }
 
 // For doing next periodic check for updates.
-var monitort *time.Timer
+var monitorTimer *time.Timer
 
 // execState is passed to the new ysco in an environment variable when exec'ing
 // itself (as part of updating itself).
@@ -451,8 +451,8 @@ func cmdRun(args []string) {
 	// Start monitoring loop.
 	var monitorc <-chan time.Time
 	if len(fallbackList(config.Monitor.Methods, defaults.Monitor.Methods)) > 0 {
-		monitort = time.NewTimer(fallback(config.Monitor.Delay, defaults.Monitor.Delay))
-		monitorc = monitort.C
+		monitorTimer = time.NewTimer(fallback(config.Monitor.Delay, defaults.Monitor.Delay))
+		monitorc = monitorTimer.C
 	}
 
 	for {
@@ -460,7 +460,7 @@ func cmdRun(args []string) {
 		case <-monitorc:
 			slog.Debug("looking for new module version or toolchain version")
 			monitorOne()
-			monitort.Reset(fallback(config.Monitor.Interval, defaults.Monitor.Interval))
+			monitorTimer.Reset(fallback(config.Monitor.Interval, defaults.Monitor.Interval))
 
 		case sig := <-signalc:
 			// Pass signals on to the service process.

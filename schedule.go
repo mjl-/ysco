@@ -151,7 +151,7 @@ func parseDayHour(s string) (dayHour, error) {
 	var hours []int
 	if len(t) == 0 {
 		hours = make([]int, 24)
-		for i := 0; i < 24; i++ {
+		for i := range 24 {
 			hours[i] = i
 		}
 	} else {
