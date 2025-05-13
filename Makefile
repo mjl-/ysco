@@ -29,6 +29,7 @@ run-root:
 	cd testdata/run-root && ../../ysco run -adminaddr localhost:2021 -metricsaddr localhost:2022 ./moxtools
 
 check:
+	CGO_ENABLED=0 ineffassign ./...
 	GOARCH=386 CGO_ENABLED=0 go vet
 	CGO_ENABLED=0 staticcheck
 
