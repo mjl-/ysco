@@ -254,6 +254,11 @@ func handleIndexGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h := w.Header()
+	if args.UpdateBusy {
+		// If we are busy, assume this page load is from the redirect after initiating the
+		// update. The update should be stable in 5s, so reload after that time.
+		h.Set("Refresh", "5")
+	}
 	h.Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(b.Bytes())
 }
