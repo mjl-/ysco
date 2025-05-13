@@ -211,7 +211,7 @@ func parseConfigReader(r io.Reader, c *Config) error {
 		return err
 	}
 
-	if c.Update.Delay != 0 && c.Update.Delay <= 5*time.Second {
+	if c.Update.Delay != 0 && c.Update.Delay < 5*time.Second {
 		return fmt.Errorf("update delay must be >= 5s due to potential for rollback of previous update")
 	}
 	for _, s := range c.Update.Schedule {

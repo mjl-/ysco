@@ -23,10 +23,10 @@ test-integration:
 
 run:
 	# -updateschedule mo 
-	./ysco run -loglevel debug -updatedelay 5s -updatejitter 5s -adminaddr localhost:2200 -metricsaddr localhost:2201 -monitordelay 3s ./moxtools
+	cd testdata/run && ../../ysco run -addr localhost:2020 ./moxtools
 
 run-root:
-	./ysco run -user 1000 -loglevel debug -updatedelay 5s -updatejitter 5s -adminaddr localhost:2200 -metricsaddr localhost:2201 -monitordelay 3s ./moxtools
+	cd testdata/run-root && ../../ysco run -adminaddr localhost:2021 -metricsaddr localhost:2022 ./moxtools
 
 check:
 	GOARCH=386 CGO_ENABLED=0 go vet
