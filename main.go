@@ -889,6 +889,10 @@ func cmdRun(args []string) {
 	slog.Debug("self info", "modpath", selfinfo.Main.Path, "pkgdir", packageDir(selfinfo), "version", selfinfo.Main.Version, "goversion", selfinfo.GoVersion)
 	slog.Debug("starting service", "cmd", cmdArgs)
 
+	metricSelfVersion.Reset()
+	metricSvcVersion.Reset()
+	metricSvcGoVersion.Reset()
+	metricSvcModPath.Reset()
 	metricSelfVersion.WithLabelValues(selfinfo.Main.Version).Set(1)
 	metricSvcVersion.WithLabelValues(svcinfo.Main.Version).Set(1)
 	metricSvcGoVersion.WithLabelValues(svcinfo.GoVersion).Set(1)
@@ -1855,6 +1859,8 @@ func updateInstall(which Which, dr downloadResult, manual bool, respWriter http.
 	updating.svcinfoPrev = updating.svcinfo
 	updating.binaryPathPrev = prevPath
 	updating.svcinfo = dr.newinfo
+	metricSvcVersion.Reset()
+	metricSvcGoVersion.Reset()
 	metricSvcVersion.WithLabelValues(updating.svcinfo.Main.Version).Set(1)
 	metricSvcGoVersion.WithLabelValues(updating.svcinfo.GoVersion).Set(1)
 	p := updating.process
@@ -2045,6 +2051,8 @@ func updateRollback() error {
 
 	updating.svcinfo = updating.svcinfoPrev
 	updating.svcinfoPrev = nil
+	metricSvcVersion.Reset()
+	metricSvcGoVersion.Reset()
 	metricSvcVersion.WithLabelValues(updating.svcinfo.Main.Version).Set(1)
 	metricSvcGoVersion.WithLabelValues(updating.svcinfo.GoVersion).Set(1)
 	updating.binaryPathPrev = ""
