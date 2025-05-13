@@ -38,21 +38,21 @@ Then we start:
 
 # Mode of operation
 
-Ysco will start the service ("./app" in the example above) with its flags,
+Ysco will start the service ("./moxtools" in the example above) with its flags,
 forwards signals (intr, term, hup, usr1, usr2), and exits when the command
-exits. Use a supervisor system, like systemd on Linux or rc.d scripts on BSDs
-to restart ysco.
+exits. Use a supervisor system, like systemd on Linux or rc.d scripts on BSDs to
+restart ysco.
 
-At startup ysco reads the module/package path from "./app" and starts looking
-for updates for the module and Go toolchains in the background, and also for
-updates for ysco itself. When ready to update, ysco downloads a new binary,
-replaces "./app" (or "./ysco" when updating itself), and restarts the service
-(or execs itself, for updates without restarts). If the new "./app" exits
-within 5 seconds, the update is rolled back.
+At startup ysco reads the module/package path from the service binary and starts
+looking for updates for the module and Go toolchains in the background, and also
+for updates for ysco itself. When ready to update, ysco downloads a new binary,
+replaces the service symlink (or "./ysco" when updating itself), and restarts
+the service (or execs itself, for updates without restarts). If the new binary
+exits within 5 seconds, the update is rolled back.
 
-It is recommended to make "./ysco" and "./app" symlinks to specific versions,
-e.g. "ysco-v0.0.1-go1.23.2". Ysco will then also create such symlinks, making
-it easy to see which is the current version from command-line tools like "ls".
+Ysco creates short symlinks pointing to binaries with full version information
+in its name, e.g. "ysco" to "ysco-v0.0.1-go1.23.2", making it easy to see which
+is the current version from command-line tools like "ls".
 
 When updating, the previous binary is kept in the file system, but older
 binaries are automatically cleaned up.
