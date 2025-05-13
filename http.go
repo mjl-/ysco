@@ -381,10 +381,10 @@ func handleIndexPost(w http.ResponseWriter, r *http.Request) {
 			slog.Error("open ys dir after writing config file for sync", "err", err)
 		} else {
 			if err := d.Sync(); err != nil {
-				slog.Error("sync ys dir after writing config file")
+				slog.Error("sync ys dir after writing config file", "err", err)
 			}
 			if err := d.Close(); err != nil {
-				slog.Error("close ys dir after syncing after writing config file")
+				slog.Error("close ys dir after syncing after writing config file", "err", err)
 			}
 		}
 
