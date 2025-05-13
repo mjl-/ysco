@@ -104,7 +104,7 @@ type indexArgs struct {
 
 func gatherIndexArgs() (indexArgs, error) {
 	schedule.Lock()
-	scheduled := append([]Update{}, schedule.updates...)
+	scheduled := slices.Clone(schedule.updates)
 	schedule.Unlock()
 
 	updating.Lock()
@@ -115,8 +115,8 @@ func gatherIndexArgs() (indexArgs, error) {
 	updating.Unlock()
 
 	oldBinaries.Lock()
-	oldbinsself := append([]string{}, oldBinaries.Self...)
-	oldbinssvc := append([]string{}, oldBinaries.Svc...)
+	oldbinsself := slices.Clone(oldBinaries.Self)
+	oldbinssvc := slices.Clone(oldBinaries.Svc)
 	oldBinaries.Unlock()
 
 	// todo: do lookups in goroutines.
@@ -325,7 +325,7 @@ func handleIndexPost(w http.ResponseWriter, r *http.Request) {
 			respWriter = w
 		}
 		// note: if which is Self, and the update is successful, the process is replaced and this won't return.
-		if err := update(which, info.Main.Path, packageDir(info), version, goversion, nil, respWriter, true, true); err != nil {
+		if err := update(which, info.Main.Path, version, goversion, nil, respWriter, true, true); err != nil {
 			if errors.Is(err, errUpdateBusy) {
 				httpErrorf(w, r, http.StatusBadRequest, "update busy")
 			} else {
@@ -494,7 +494,7 @@ func handleUpdate(w http.ResponseWriter, r *http.Request) {
 		respWriter = w
 	}
 	// note: if which is Self, and the update successful, the process is replaced and never returns.
-	if err := update(which, info.Main.Path, packageDir(info), version, goversion, nil, respWriter, false, true); err != nil {
+	if err := update(which, info.Main.Path, version, goversion, nil, respWriter, false, true); err != nil {
 		if errors.Is(err, errUpdateBusy) {
 			httpErrorf(w, r, http.StatusBadRequest, "update busy")
 		} else {

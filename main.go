@@ -1135,7 +1135,7 @@ func reschedule() {
 		// Take backoff into account, if any.
 		uptm := up.Time
 		var backoff time.Duration
-		for i := 0; i < schedule.backoff; i++ {
+		for i := range schedule.backoff {
 			if i == 0 {
 				backoff = time.Hour
 			} else {
@@ -1152,17 +1152,12 @@ func reschedule() {
 
 		jitter := time.Duration(secretRand.Int64N(int64(fallback(config.Update.Jitter, defaults.Update.Jitter)/time.Second))) * time.Second
 		d += jitter
-		if d < 0 {
-			d = 0
-		}
+		d = max(0, d)
 		tm := uptm.Add(d)
 		if tm.After(uptm.Add(time.Hour)) {
 			tm = uptm.Add(time.Hour)
 		}
-		d = time.Until(tm)
-		if d < 0 {
-			d = 0
-		}
+		d = max(0, time.Until(tm))
 
 		slog.Info("next update scheduled", "time", uptm, "wait", d, "version", schedule.up.Version, "goversion", schedule.up.GoVersion, "modpath", schedule.up.ModPath, "pkgdir", schedule.up.PkgDir, "which", schedule.up.Which)
 		schedule.timer.Stop()
@@ -1203,7 +1198,7 @@ func updateUpcoming() {
 	go func() {
 		xup := *up
 		// note: if up.Which is Self, update execs itself and never returns.
-		err := update(up.Which, up.ModPath, up.PkgDir, up.Version, up.GoVersion, &xup, nil, false, false)
+		err := update(up.Which, up.ModPath, up.Version, up.GoVersion, &xup, nil, false, false)
 		if err != nil {
 			slog.Error("updating failed", "err", err)
 		}
@@ -1601,7 +1596,7 @@ var errUpdateBusy = errors.New("update in progress")
 // When updating itself, when respWriter is not nil, its FD is passed to the
 // newly exec-ed process, which will write an http response indicating a
 // successful update.
-func update(which Which, modpath, pkgdir string, version, goversion string, up *Update, respWriter http.ResponseWriter, redirect bool, manual bool) (rerr error) {
+func update(which Which, modpath, version, goversion string, up *Update, respWriter http.ResponseWriter, redirect bool, manual bool) (rerr error) {
 	updating.Lock()
 	if updating.busy {
 		updating.Unlock()
@@ -1913,8 +1908,7 @@ func execSelf(isConfigChange bool, respWriter http.ResponseWriter, redirect bool
 		return err
 	}
 
-	env := append([]string{}, os.Environ()...)
-	env = append(env, fmt.Sprintf("_YSCO_EXEC=%s", esbuf))
+	env := append(os.Environ(), fmt.Sprintf("_YSCO_EXEC=%s", esbuf))
 	slog.Debug("exec with environment", "env", env)
 	if err := unix.Exec(os.Args[0], os.Args, env); err != nil {
 		slog.Error("exec", "err", err)
@@ -1943,7 +1937,7 @@ func updateBinariesTxt(old []string, txtPath, prevPath, newPath string) (newOld 
 	if prevPath == newPath {
 		return old
 	}
-	old = removeOldBinaries(old, txtPath, newPath)
+	old = removeOldBinaries(old, newPath)
 	old = append(old, prevPath)
 	p := filepath.Join(cacheDir, txtPath)
 	data := []byte(strings.Join(old, "\n") + "\n")
@@ -1961,7 +1955,7 @@ func listOldBinaries(txtPath string) ([]string, error) {
 	return strings.Split(strings.TrimRight(string(data), "\n"), "\n"), nil
 }
 
-func removeOldBinaries(l []string, txtPath, newPath string) (nl []string) {
+func removeOldBinaries(l []string, newPath string) (nl []string) {
 	for _, p := range l {
 		if isSymlinkDest(p, cmdArgs[0]) || isSymlinkDest(p, os.Args[0]) {
 			slog.Warn("not removing old binary that is currently a symlink target", "oldpath", p)
