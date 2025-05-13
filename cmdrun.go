@@ -103,8 +103,8 @@ var updating struct {
 	selfinfo *debug.BuildInfo
 
 	// Of previous binary, set when doing an update, for rollback.
-	svcinfoPrev    *debug.BuildInfo
-	binaryPathPrev string
+	svcinfoPrev       *debug.BuildInfo
+	binaryPathPrevAbs string
 }
 
 var schedule struct {
@@ -1125,7 +1125,7 @@ func update(which Which, modpath, version, goversion string, up *Update, respWri
 	if err := updateInstall(which, dr, up == nil, respWriter, redirect); err != nil {
 		// Clean up temporary file.
 		if err := os.Remove(dr.tmpName); err != nil {
-			slog.Error("cleaning up temporary file", "tmpname", dr.tmpName)
+			slog.Error("cleaning up temporary file", "err", err, "tmpname", dr.tmpName)
 		}
 		return err
 	}
@@ -1133,11 +1133,29 @@ func update(which Which, modpath, version, goversion string, up *Update, respWri
 }
 
 type downloadResult struct {
-	origPath, tmpName, versionPath string
-	originfo, newinfo              *debug.BuildInfo
+	// Path that we want to make the binary available as, as a symlink if currently
+	// one, or a regular file otherwise.
+	destPath string
+
+	// Path of previous binary. If destPath is a symlink, this is the path it points
+	// to. Otherwise it's equal to destPath.
+	origBinPathAbs string
+
+	// Temporary filename for the new binary, as returned by updateDownload.
+	tmpName string
+
+	// The intended filename instead of tmpName, including application and Go versions.
+	// Caller should rename tmpName to versionPath and either make destPath a symlink
+	// to this file (if currently a symlink), or rename it to destPath.
+	versionPath string
+
+	// Of previous/original binary, and new binary.
+	originfo, newinfo *debug.BuildInfo
 }
 
 // updateDownload fetches a binary for an update to be installed.
+// The new binary is placed in the same directory as the current binary (after
+// following a potential symlink).
 func updateDownload(which Which, originfo *debug.BuildInfo, version, goversion string) (downloadResult, error) {
 	bs := buildSpec{
 		Mod:       originfo.Main.Path,
@@ -1170,14 +1188,14 @@ func updateDownload(which Which, originfo *debug.BuildInfo, version, goversion s
 	url := downloadURL(br)
 	slog.Debug("build result", "size", br.Filesize, "sum", br.Sum, "buildspec", bs)
 
-	var origPath string
+	var destPath string
 	if which == Self {
-		origPath = os.Args[0]
+		destPath = os.Args[0]
 	} else {
-		origPath = cmdArgs[0]
+		destPath = cmdArgs[0]
 	}
 
-	dstDir := filepath.Dir(origPath)
+	dstDir := filepath.Dir(destPath)
 	versionName := downloadFilename(br)
 	versionPath := filepath.Join(dstDir, versionName)
 	f, err := os.CreateTemp(dstDir, fmt.Sprintf("ysco.%s.*", versionName))
@@ -1215,8 +1233,17 @@ func updateDownload(which Which, originfo *debug.BuildInfo, version, goversion s
 	}
 	f = nil
 
+	origBinPath, err := filepath.EvalSymlinks(destPath)
+	if err != nil {
+		return downloadResult{}, fmt.Errorf("eval symlinks for dest path: %v", err)
+	}
+	origBinPath, err = filepath.Abs(origBinPath)
+	if err != nil {
+		return downloadResult{}, fmt.Errorf("making original binary path absolute: %v", err)
+	}
+
 	// Copy permission modes (including setuid/setgid/sticky) and possibly uid/gid from previous binary.
-	fi, err := os.Stat(origPath)
+	fi, err := os.Stat(destPath)
 	if err != nil {
 		return downloadResult{}, fmt.Errorf("stat binary for uid/gid and permissions: %v", err)
 	}
@@ -1233,7 +1260,7 @@ func updateDownload(which Which, originfo *debug.BuildInfo, version, goversion s
 		return downloadResult{}, fmt.Errorf("chmod new binary: %v", err)
 	}
 
-	dr := downloadResult{origPath, tmpName, versionPath, originfo, newinfo}
+	dr := downloadResult{destPath, origBinPath, tmpName, versionPath, originfo, newinfo}
 	// Prevent cleanup.
 	tmpName = ""
 
@@ -1251,7 +1278,8 @@ func updateInstall(which Which, dr downloadResult, manual bool, respWriter http.
 		"which", which,
 		"tmpname", dr.tmpName,
 		"versionpath", dr.versionPath,
-		"path", dr.origPath,
+		"origbinpath", dr.origBinPathAbs,
+		"path", dr.destPath,
 		"origversion", dr.originfo.Main.Version,
 		"origgoversion", dr.originfo.GoVersion,
 		"newversion", dr.newinfo.Main.Version,
@@ -1282,7 +1310,7 @@ func updateInstall(which Which, dr downloadResult, manual bool, respWriter http.
 		return fmt.Errorf("rename temp file to version path %s: %v", dr.versionPath, err)
 	}
 
-	prevPath, err := installBinary(dr.versionPath, dr.origPath, dr.originfo)
+	prevPathAbs, err := installBinary(dr.versionPath, dr.destPath, dr.originfo)
 	if err != nil {
 		return err
 	}
@@ -1292,7 +1320,7 @@ func updateInstall(which Which, dr downloadResult, manual bool, respWriter http.
 		// Exec ourselves. We remove any pause.txt when we are back online again.
 
 		oldBinaries.Lock()
-		oldBinaries.Self = updateBinariesTxt(oldBinaries.Self, "old-binaries-self.txt", prevPath, dr.origPath)
+		oldBinaries.Self = updateBinariesTxt(oldBinaries.Self, "old-binaries-self.txt", prevPathAbs, dr.origBinPathAbs)
 		oldBinaries.Unlock()
 
 		// We are either successful and don't return, or return an error.
@@ -1311,7 +1339,7 @@ func updateInstall(which Which, dr downloadResult, manual bool, respWriter http.
 	updating.Lock()
 	updating.pauseReason = ""
 	updating.svcinfoPrev = updating.svcinfo
-	updating.binaryPathPrev = prevPath
+	updating.binaryPathPrevAbs = prevPathAbs
 	updating.svcinfo = dr.newinfo
 	metricSvcVersion.Reset()
 	metricSvcGoVersion.Reset()
@@ -1321,7 +1349,7 @@ func updateInstall(which Which, dr downloadResult, manual bool, respWriter http.
 	updating.Unlock()
 
 	oldBinaries.Lock()
-	oldBinaries.Svc = updateBinariesTxt(oldBinaries.Svc, "old-binaries-svc.txt", prevPath, dr.origPath)
+	oldBinaries.Svc = updateBinariesTxt(oldBinaries.Svc, "old-binaries-svc.txt", prevPathAbs, dr.origBinPathAbs)
 	oldBinaries.Unlock()
 
 	// todo: should we send signal to progress group instead of just process?
@@ -1392,16 +1420,19 @@ func isOldBinary(which Which, path string) bool {
 }
 
 // must be called with oldBinaries locked.
-func updateBinariesTxt(old []string, txtPath, prevPath, newPath string) (newOld []string) {
-	slog.Debug("maintenance for old binaries", "txtpath", txtPath, "prev", prevPath, "new", newPath)
-	if prevPath == newPath {
-		return old
+// old is the current contents of the "old files" text file, at txtPath, which
+// we'll rewrite. prevBinPathAbs is the path we want to add to that file, for
+// future removal. newBinPathAbs is the new binary, we won't clean it up and won't
+// add it to the txt file (that will happen with the next update).
+func updateBinariesTxt(old []string, txtName, prevBinPathAbs, newBinPathAbs string) (newOld []string) {
+	txtPath := filepath.Join(cacheDir, txtName)
+	slog.Debug("maintenance for old binaries", "txtpath", txtPath, "prevbinpath", prevBinPathAbs, "newbinpath", newBinPathAbs)
+	old = removeOldBinaries(old, newBinPathAbs)
+	if prevBinPathAbs != newBinPathAbs {
+		old = append(old, prevBinPathAbs)
 	}
-	old = removeOldBinaries(old, newPath)
-	old = append(old, prevPath)
-	p := filepath.Join(cacheDir, txtPath)
 	data := []byte(strings.Join(old, "\n") + "\n")
-	if err := os.WriteFile(p, data, 0600); err != nil {
+	if err := os.WriteFile(txtPath, data, 0600); err != nil {
 		slog.Warn("writing binaries text file for future cleanup", "err", err, "txtpath", txtPath)
 	}
 	return old
@@ -1415,39 +1446,59 @@ func listOldBinaries(txtPath string) ([]string, error) {
 	return strings.Split(strings.TrimRight(string(data), "\n"), "\n"), nil
 }
 
-func removeOldBinaries(l []string, newPath string) (nl []string) {
-	for _, p := range l {
-		if isSymlinkDest(p, cmdArgs[0]) || isSymlinkDest(p, os.Args[0]) {
-			slog.Warn("not removing old binary that is currently a symlink target", "oldpath", p)
-			continue
-		}
+func removeOldBinary(p, newBinPathAbs string) (removed bool) {
+	p, err := filepath.Abs(p)
+	if err != nil {
+		slog.Warn("evaluating old binary path to absolute path", "err", err, "oldpath", p)
+		return false
+	}
+	if p == newBinPathAbs {
+		slog.Warn("not removing old binary that is same as new binary", "path", p)
+		return false
+	}
+	if isSymlinkDest(p, cmdArgs[0]) || isSymlinkDest(p, os.Args[0]) {
+		slog.Warn("not removing old binary that is currently a symlink target", "oldpath", p)
+		return false
+	}
 
-		if filepath.Dir(p) != filepath.Dir(cmdArgs[0]) {
-			slog.Warn("suspicious old binary in txt file with old binaries, not in same directory as current binary, ignoring", "oldpath", p, "curpath", cmdArgs[0])
+	if err := os.Remove(p); err != nil {
+		slog.Error("removing old binary", "path", p, "err", err)
+		return false
+	}
+	slog.Info("old binary removed", "path", p)
+	return true
+}
+
+// removeOldBinaries removes paths from l, skipping those that are equal to
+// newBinPathAbs, or where the current ysco or service binary is a symlink to a
+// path.
+func removeOldBinaries(l []string, newBinPathAbs string) (nl []string) {
+	for _, p := range l {
+		if ok := removeOldBinary(p, newBinPathAbs); !ok {
 			nl = append(nl, p)
-			continue
-		}
-		if p == newPath {
-			slog.Warn("not removing old binary that is same as new binary", "path", p)
-			continue
-		}
-		if err := os.Remove(p); err != nil {
-			slog.Error("removing old binary", "path", p, "err", err)
-			nl = append(nl, p)
-			continue
-		} else {
-			slog.Info("old binary removed", "path", p)
 		}
 	}
 	return nl
 }
 
-func isSymlinkDest(p, link string) bool {
+func isSymlinkDest(pathAbs, link string) bool {
 	s, err := os.Readlink(link)
-	return err == nil && s == p
+	if err != nil {
+		return false
+	}
+	s, err = filepath.Abs(s)
+	if err != nil {
+		return false
+	}
+	return s == pathAbs
 }
 
-func installBinary(binPath string, dstPath string, info *debug.BuildInfo) (prevPath string, rerr error) {
+// installBinary ensures the file at binPath is available at dstPath. Both files
+// are in the same directory.
+// If dstPath is currently a symlink, it is replaced with a symlink to binPath.
+// Otherwise binPath is renamed to dstPath.
+// The previous path is returned, it is always absolute.
+func installBinary(binPath string, dstPath string, info *debug.BuildInfo) (prevPathAbs string, rerr error) {
 	if fi, err := os.Lstat(dstPath); err != nil {
 		return "", fmt.Errorf("lstat %s: %v", dstPath, err)
 	} else if fi.Mode()&fs.ModeSymlink == 0 {
@@ -1458,48 +1509,58 @@ func installBinary(binPath string, dstPath string, info *debug.BuildInfo) (prevP
 			suffix += ".exe"
 		}
 		prevName := fmt.Sprintf("%s-%s-%s%s", path.Base(info.Main.Path), info.Main.Version, info.GoVersion, suffix)
-		prevPath = filepath.Join(filepath.Dir(binPath), prevName)
-		if _, err := os.Stat(prevPath); err == nil {
-			prevPath += "." + genrandom()
-		} else if !errors.Is(err, fs.ErrNotExist) {
-			return "", fmt.Errorf("stat %s, to move current binary to: %v", prevPath, err)
+		prevPathAbs = filepath.Join(filepath.Dir(binPath), prevName)
+		prevPathAbs, err = filepath.Abs(prevPathAbs)
+		if err != nil {
+			return "", fmt.Errorf("absolute previous path %q: %v", prevPathAbs, err)
 		}
-		if err := os.Rename(dstPath, prevPath); err != nil {
-			return "", fmt.Errorf("moving current binary %s out of the way to %s: %v", dstPath, prevPath, err)
+		if _, err := os.Stat(prevPathAbs); err == nil {
+			prevPathAbs += "." + genrandom()
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("stat %s, to move current binary to: %v", prevPathAbs, err)
+		}
+		if err := os.Rename(dstPath, prevPathAbs); err != nil {
+			return "", fmt.Errorf("moving current binary %s out of the way to %s: %v", dstPath, prevPathAbs, err)
 		}
 		if err := os.Rename(binPath, dstPath); err != nil {
 			return "", fmt.Errorf("moving new binary %s in place to %s: %v", binPath, dstPath, err)
 		}
-		slog.Info("current binary moved out of the way and new binary moved in place", "oldpath", prevPath)
-		return prevPath, nil
+		slog.Info("current binary moved out of the way and new binary moved in place", "oldpath", prevPathAbs)
+		return prevPathAbs, nil
 	}
 
 	// We'll remove the symlink and create a new one.
 	slog.Info("installing binary, current path is a symlink", "path", dstPath)
 	var err error
-	prevPath, err = os.Readlink(dstPath)
+	prevPathAbs, err = os.Readlink(dstPath)
 	if err != nil {
 		return "", fmt.Errorf("reading destination of current symlink: %v", err)
+	}
+	if !filepath.IsAbs(prevPathAbs) {
+		prevPathAbs, err = filepath.Abs(filepath.Join(filepath.Dir(dstPath), prevPathAbs))
+		if err != nil {
+			return "", fmt.Errorf("evaluting previous path to absolute: %v", err)
+		}
 	}
 	if err := os.Remove(dstPath); err != nil {
 		return "", fmt.Errorf("removing current binary symlink: %v", err)
 	}
-	if err := os.Symlink(binPath, dstPath); err != nil {
+	if err := os.Symlink(filepath.Base(binPath), dstPath); err != nil {
 		slog.Error("symlink new binary to current binary path", "err", err)
-		if xerr := os.Symlink(prevPath, dstPath); xerr != nil {
-			slog.Error("restoring symlink after failure to create link failed", "err", xerr, "symlinkname", prevPath, "symlinkdst", dstPath)
+		if xerr := os.Symlink(prevPathAbs, dstPath); xerr != nil {
+			slog.Error("restoring symlink after failure to create link failed", "err", xerr, "symlinkname", prevPathAbs, "symlinkdst", dstPath)
 		}
 		return "", fmt.Errorf("symlink new binary: %v", err)
 	}
-	slog.Info("new binary installed and symlinked", "symlinkname", binPath, "symlinkdst", dstPath)
-	return prevPath, nil
+	slog.Info("new binary installed and symlinked", "symlinkname", binPath, "symlinkdst", dstPath, "prevpath", prevPathAbs)
+	return prevPathAbs, nil
 }
 
 // called with "updating" lock held.
 func updateRollback() error {
-	slog.Warn("attempting to rollback to previous binary", "prevbinary", updating.binaryPathPrev, "prevversion", updating.svcinfoPrev.Main.Version, "prevgoversion", updating.svcinfoPrev.GoVersion)
+	slog.Warn("attempting to rollback to previous binary", "prevbinary", updating.binaryPathPrevAbs, "prevversion", updating.svcinfoPrev.Main.Version, "prevgoversion", updating.svcinfoPrev.GoVersion)
 
-	if _, err := installBinary(updating.binaryPathPrev, cmdArgs[0], updating.svcinfo); err != nil {
+	if _, err := installBinary(updating.binaryPathPrevAbs, cmdArgs[0], updating.svcinfo); err != nil {
 		return fmt.Errorf("restoring previous binary again: %v", err)
 	}
 
@@ -1509,6 +1570,6 @@ func updateRollback() error {
 	metricSvcGoVersion.Reset()
 	metricSvcVersion.WithLabelValues(updating.svcinfo.Main.Version).Set(1)
 	metricSvcGoVersion.WithLabelValues(updating.svcinfo.GoVersion).Set(1)
-	updating.binaryPathPrev = ""
+	updating.binaryPathPrevAbs = ""
 	return nil
 }
