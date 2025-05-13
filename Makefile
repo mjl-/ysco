@@ -16,10 +16,11 @@ test:
 
 test-integration:
 	# WARNING: the test uses ysco from the last git commit, not from the working directory. commit changes before testing.
-	-docker-compose down
-	docker-compose build
-	docker-compose run test
-	docker-compose down -t1
+	-docker compose kill
+	-docker compose down
+	docker compose build
+	docker compose run test
+	docker compose kill
 
 run:
 	# -updateschedule mo 

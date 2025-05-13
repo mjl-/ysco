@@ -136,12 +136,12 @@ func TestIntegration(t *testing.T) {
 
 	getState()
 	tcompare(state.SvcVersion, "v0.0.5")
-	tcompare(state.SvcGoVersion, "go1.23.2")
+	tcompare(state.SvcGoVersion, "go1.24.2")
 	tcompare(state.SelfVersion, "v0.9.9")
-	tcompare(state.SelfGoVersion, "go1.23.2")
+	tcompare(state.SelfGoVersion, "go1.24.2")
 
-	fmt.Println("# Updating service to v0.0.4, go1.22.8.")
-	resp, err = httpclient.PostForm("http://admin:test1234@127.0.0.1:8523", urlValues("command", "update", "which", "svc", "version", "v0.0.4", "goversion", "go1.22.8"))
+	fmt.Println("# Updating service to v0.0.4, go1.23.8.")
+	resp, err = httpclient.PostForm("http://admin:test1234@127.0.0.1:8523", urlValues("command", "update", "which", "svc", "version", "v0.0.4", "goversion", "go1.23.8"))
 	tcheck(err, "update svc")
 	tcompare(resp.StatusCode, http.StatusSeeOther)
 	err = resp.Body.Close()
@@ -149,7 +149,7 @@ func TestIntegration(t *testing.T) {
 
 	getState()
 	tcompare(state.SvcVersion, "v0.0.4")
-	tcompare(state.SvcGoVersion, "go1.22.8")
+	tcompare(state.SvcGoVersion, "go1.23.8")
 
 	fmt.Println("# Checking for updates, should find v0.0.5.")
 	resp, err = httpclient.PostForm("http://admin:test1234@127.0.0.1:8523", urlValues("command", "check"))
@@ -161,8 +161,8 @@ func TestIntegration(t *testing.T) {
 	fmt.Println("# Waiting for rollback period to expire")
 	time.Sleep(6 * time.Second)
 
-	fmt.Println("# Updating service to v0.0.5, go1.23.2.")
-	resp, err = httpclient.PostForm("http://admin:test1234@127.0.0.1:8523", urlValues("command", "update", "which", "svc", "version", "v0.0.5", "goversion", "go1.23.2"))
+	fmt.Println("# Updating service to v0.0.5, go1.24.2.")
+	resp, err = httpclient.PostForm("http://admin:test1234@127.0.0.1:8523", urlValues("command", "update", "which", "svc", "version", "v0.0.5", "goversion", "go1.24.2"))
 	tcheck(err, "update svc")
 	tcompare(resp.StatusCode, http.StatusSeeOther)
 	err = resp.Body.Close()
@@ -170,13 +170,13 @@ func TestIntegration(t *testing.T) {
 
 	getState()
 	tcompare(state.SvcVersion, "v0.0.5")
-	tcompare(state.SvcGoVersion, "go1.23.2")
+	tcompare(state.SvcGoVersion, "go1.24.2")
 
 	fmt.Println("# Waiting for rollback period to expire")
 	time.Sleep(6 * time.Second)
 
-	fmt.Println("# Updating self to v0.9.8 go1.23.2.")
-	resp, err = httpclient.PostForm("http://admin:test1234@127.0.0.1:8523", urlValues("command", "update", "which", "self", "version", "v0.9.8", "goversion", "go1.23.2"))
+	fmt.Println("# Updating self to v0.9.8 go1.24.2.")
+	resp, err = httpclient.PostForm("http://admin:test1234@127.0.0.1:8523", urlValues("command", "update", "which", "self", "version", "v0.9.8", "goversion", "go1.24.2"))
 	tcheck(err, "update self")
 	tcompare(resp.StatusCode, http.StatusSeeOther)
 	err = resp.Body.Close()
@@ -184,13 +184,13 @@ func TestIntegration(t *testing.T) {
 
 	getState()
 	tcompare(state.SelfVersion, "v0.9.8")
-	tcompare(state.SelfGoVersion, "go1.23.2")
+	tcompare(state.SelfGoVersion, "go1.24.2")
 
 	fmt.Println("# Waiting for rollback period to expire")
 	time.Sleep(6 * time.Second)
 
-	fmt.Println("# Updating self to v0.9.9 go1.23.2.")
-	resp, err = httpclient.PostForm("http://admin:test1234@127.0.0.1:8523", urlValues("command", "update", "which", "self", "version", "v0.9.9", "goversion", "go1.23.2"))
+	fmt.Println("# Updating self to v0.9.9 go1.24.2.")
+	resp, err = httpclient.PostForm("http://admin:test1234@127.0.0.1:8523", urlValues("command", "update", "which", "self", "version", "v0.9.9", "goversion", "go1.24.2"))
 	tcheck(err, "update self")
 	tcompare(resp.StatusCode, http.StatusSeeOther)
 	err = resp.Body.Close()
@@ -198,13 +198,13 @@ func TestIntegration(t *testing.T) {
 
 	getState()
 	tcompare(state.SelfVersion, "v0.9.9")
-	tcompare(state.SelfGoVersion, "go1.23.2")
+	tcompare(state.SelfGoVersion, "go1.24.2")
 
 	fmt.Println("# Waiting for rollback period to expire")
 	time.Sleep(6 * time.Second)
 
-	fmt.Println("# Updating self to v0.9.8 go1.22.8.")
-	resp, err = httpclient.PostForm("http://admin:test1234@127.0.0.1:8523", urlValues("command", "update", "which", "self", "version", "v0.9.8", "goversion", "go1.22.8"))
+	fmt.Println("# Updating self to v0.9.8 go1.23.8.")
+	resp, err = httpclient.PostForm("http://admin:test1234@127.0.0.1:8523", urlValues("command", "update", "which", "self", "version", "v0.9.8", "goversion", "go1.23.8"))
 	tcheck(err, "update self")
 	tcompare(resp.StatusCode, http.StatusSeeOther)
 	err = resp.Body.Close()
@@ -212,7 +212,7 @@ func TestIntegration(t *testing.T) {
 
 	getState()
 	tcompare(state.SelfVersion, "v0.9.8")
-	tcompare(state.SelfGoVersion, "go1.22.8")
+	tcompare(state.SelfGoVersion, "go1.23.8")
 
 	fmt.Println("# Waiting for rollback period to expire")
 	time.Sleep(6 * time.Second)

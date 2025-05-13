@@ -7,7 +7,7 @@ services:
   # We run integration_test.go from this container. It starts ysco, then makes HTTP
   # calls to make it update, let it discover new versions.
   test:
-    image: ysco-golang-alpine-git:1.23.2-alpine
+    image: ysco-golang-alpine-git:1.24.2-alpine
     build: testdata/golang-alpine-git # The services below use the same image.
     # note: runs as root, ysco starts its service as uid 1000
     command: ["/testdata/test.sh"]
@@ -23,7 +23,7 @@ services:
         condition: service_healthy
 
   git:
-    image: ysco-golang-alpine-git:1.23.2-alpine
+    image: ysco-golang-alpine-git:1.24.2-alpine
     # build: testdata/golang-alpine-git # Commented out because docker will try to build it again.
     command: ["/testdata/git.sh"]
     user: 1000:1000
@@ -48,7 +48,7 @@ services:
       retries: 30
 
   goproxy:
-    image: ysco-golang-alpine-git:1.23.2-alpine
+    image: ysco-golang-alpine-git:1.24.2-alpine
     # build: testdata/golang-alpine-git
     command: ["/testdata/goproxy.sh"]
     user: 1000:1000
@@ -71,7 +71,7 @@ services:
       retries: 30
 
   xgosumdb:
-    image: ysco-golang-alpine-git:1.23.2-alpine
+    image: ysco-golang-alpine-git:1.24.2-alpine
     # build: testdata/golang-alpine-git
     command: ["/testdata/xgosumdb.sh"]
     user: 1000:1000
@@ -94,7 +94,7 @@ services:
       retries: 30
 
   gobuild:
-    image: ysco-golang-alpine-git:1.23.2-alpine
+    image: ysco-golang-alpine-git:1.24.2-alpine
     # build: testdata/golang-alpine-git
     user: 1000:1000
     command: ["/testdata/gobuild.sh"]
