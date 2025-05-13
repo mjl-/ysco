@@ -74,7 +74,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		key := strings.TrimPrefix(r.URL.Path, "/lookup/")
 		id, err := s.ops.Lookup(ctx, key)
 		if err != nil {
-			reportError(w, r, err)
+			reportError(w, err)
 			return
 		}
 		records, err := s.ops.ReadRecords(ctx, id, 1)
@@ -121,7 +121,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			start := t.N << uint(t.H)
 			records, err := s.ops.ReadRecords(ctx, start, int64(t.W))
 			if err != nil {
-				reportError(w, r, err)
+				reportError(w, err)
 				return
 			}
 			if len(records) != t.W {
@@ -143,7 +143,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		data, err := s.ops.ReadTileData(ctx, t)
 		if err != nil {
-			reportError(w, r, err)
+			reportError(w, err)
 			return
 		}
 		w.Header().Set("Content-Type", "application/octet-stream")
@@ -156,7 +156,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // Otherwise it is an internal server error.
 // The caller must only call reportError in contexts where
 // a not-found err should be reported as 404.
-func reportError(w http.ResponseWriter, r *http.Request, err error) {
+func reportError(w http.ResponseWriter, err error) {
 	if os.IsNotExist(err) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return

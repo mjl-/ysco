@@ -206,7 +206,7 @@ func (c *Client) Lookup(key string) (id int64, data []byte, err error) {
 		text []byte
 		err  error
 	}
-	result := c.record.Do(file, func() interface{} {
+	result := c.record.Do(file, func() any {
 		// Try the on-disk cache, or else get from web.
 		writeCache := false
 		data, err := c.ops.ReadCache(file)
@@ -500,7 +500,7 @@ func (c *Client) readTile(tile tlog.Tile) ([]byte, error) {
 		err  error
 	}
 
-	result := c.tileCache.Do(tile, func() interface{} {
+	result := c.tileCache.Do(tile, func() any {
 		// Try the requested tile in on-disk cache.
 		data, err := c.ops.ReadCache(c.tileCacheKey(tile))
 		if err == nil {
@@ -514,10 +514,10 @@ func (c *Client) readTile(tile tlog.Tile) ([]byte, error) {
 		full := tile
 		full.W = 1 << uint(tile.H)
 		if tile != full {
-			data, err := c.ops.ReadCache(c.tileCacheKey(full))
+			fullData, err := c.ops.ReadCache(c.tileCacheKey(full))
 			if err == nil {
 				c.markTileSaved(tile) // don't save tile later; we already have full
-				return cached{data[:len(data)/full.W*tile.W], nil}
+				return cached{fullData[:len(fullData)/full.W*tile.W], nil}
 			}
 		}
 

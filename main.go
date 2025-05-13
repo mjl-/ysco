@@ -471,7 +471,7 @@ func cmdInit(args []string) {
 	// Find module path and latest version.
 	pkgPath := args[0]
 	modPath := pkgPath
-	var version string
+	var modVersion string
 	for {
 		versions, err := lookupModuleVersions(slog.Default(), modPath)
 		if err != nil {
@@ -486,7 +486,7 @@ func cmdInit(args []string) {
 		if len(versions) == 0 {
 			log.Fatalf("no stable version yet for module %q", modPath)
 		}
-		version = versions[0].Full
+		modVersion = versions[0].Full
 		break
 	}
 
@@ -509,10 +509,10 @@ func cmdInit(args []string) {
 	xcheckf(err, "new tlog client")
 
 	// Download new file.
-	log.Printf("downloading %s@%s%s...", modPath, version, pkgDir)
+	log.Printf("downloading %s@%s%s...", modPath, modVersion, pkgDir)
 	bs := buildSpec{
 		Mod:       modPath,
-		Version:   version,
+		Version:   modVersion,
 		Dir:       pkgDir,
 		Goos:      runtime.GOOS,
 		Goarch:    runtime.GOARCH,
@@ -1497,15 +1497,15 @@ func scheduleUpdate(which Which, info *debug.BuildInfo, pol VersionPolicy, poltc
 		_, _, updateAvail, _ = policyPickVersion(log, pol, poltc, tc, iv, info.GoVersion, info.GoVersion, versions)
 	}
 
-	// Schedule updates, comparing against current version or updates already scheduled.
-	version, goversion := latest(which, info)
+	// Schedule updates, comparing against current modversion or updates already scheduled.
+	modversion, goversion := latest(which, info)
 
-	v, err := parseVersion(version, time.Time{})
+	v, err := parseVersion(modversion, time.Time{})
 	if err != nil {
 		return false, false, fmt.Errorf("parsing current version: %v", err)
 	}
 
-	log = log.With("refversion", version, "refgoversion", goversion)
+	log = log.With("refversion", modversion, "refgoversion", goversion)
 
 	nvers, ngovers, update, foundMajor := policyPickVersion(log, pol, poltc, tc, v, goversion, info.GoVersion, versions)
 	if !foundMajor {
