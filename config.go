@@ -25,11 +25,11 @@ const (
 type GoVersionPolicy string
 
 const (
-	GoVersionPatch     GoVersionPolicy = "patch"
-	GoVersionMinor     GoVersionPolicy = "minor"
+	GoVersionFollow    GoVersionPolicy = "follow" // Update patch versions, and update minor version to stay on supported toolchains, and also update to latest toolchain when service version is updated.
+	GoVersionPatch     GoVersionPolicy = "patch"  // Update patch versions, not minor versions, e.g. go1.23.1 to go1.23.2, not go1.23.4 to go1.24.0.
+	GoVersionMinor     GoVersionPolicy = "minor"  // Update minor versions, e.g. go1.23 to go1.24.
 	GoVersionManual    GoVersionPolicy = "manual"
-	GoVersionSupported GoVersionPolicy = "supported"
-	GoVersionFollow    GoVersionPolicy = "follow"
+	GoVersionSupported GoVersionPolicy = "supported" // Like follow, but only update patch/minor versions, not to latest toolchain when service version is updated.
 )
 
 type Config struct {
@@ -68,10 +68,10 @@ type ConfigMonitor struct {
 }
 
 type ConfigPolicy struct {
-	Service          VersionPolicy   `sconf:"optional" sconf-doc:"Policy for updating when a new version of the monitored service is discovered. Values: patch, minor, manual."`
-	Self             VersionPolicy   `sconf:"optional" sconf-doc:"Policy for updating when a new version of ysco is discovered. Values: patch, minor, manual."`
-	ServiceToolchain GoVersionPolicy `sconf:"optional" sconf-doc:"Policy for updating the monitored service when a new Go toolchain is discovered. Values: patch, minor, manual, supported, follow."`
-	SelfToolchain    GoVersionPolicy `sconf:"optional" sconf-doc:"Policy for updating ysco when a new Go toolchain is discovered. Values: patch, minor, manual, supported, follow."`
+	Service          VersionPolicy   `sconf:"optional" sconf-doc:"Policy for updating when a new version of the monitored service is discovered. Values: patch (default), minor, manual."`
+	Self             VersionPolicy   `sconf:"optional" sconf-doc:"Policy for updating when a new version of ysco is discovered. Values: patch (default), minor, manual."`
+	ServiceToolchain GoVersionPolicy `sconf:"optional" sconf-doc:"Policy for updating the monitored service when a new Go toolchain is discovered. Values: follow (default), patch, minor, manual, supported."`
+	SelfToolchain    GoVersionPolicy `sconf:"optional" sconf-doc:"Policy for updating ysco when a new Go toolchain is discovered. Values: follow (default) patch, minor, manual, supported."`
 }
 
 type ConfigUpdate struct {

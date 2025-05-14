@@ -1057,10 +1057,7 @@ func scheduleUpdate(which Which, info debug.BuildInfo, pol VersionPolicy, poltc 
 		return
 	}
 	log.Info("found new version", "newversion", nvers.Full, "newtoolchain", ngovers)
-	if pol == VersionManual {
-		log.Debug("not scheduling update due to policy manual")
-		return
-	}
+
 	var sched Schedule = fallbackList(config.Update.schedule, defaults.Update.schedule)
 	next := sched.Next(time.Now().Add(config.Update.Delay))
 	state.Lock()
