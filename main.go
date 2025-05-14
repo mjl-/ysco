@@ -13,18 +13,6 @@ package main
 - todo: find more about standardized (sementic) versioning for applications (as opposed to libraries). major/minor/patch releases, updates for security issues, bugfixes, (incompatible) updates that require operator intervention, new features.
 */
 
-/*
-Files we use:
-- ys/
-	- ysco.conf, config file.
-	- password.txt, default file for admin web interface .
-	- scheduled.txt, lines with scheduled updates.
-	- pause.txt, only present if we aren't currently automatically updating, e.g. after an error during an update.
-	- old-binaries-svc.txt, old binaries for the service that we will remove on the next update.
-	- old-binaries-self.txt, for binaries for ysco itself.
-	- gobuildverifiercache/..., transparency log files, for downloading binaries.
-*/
-
 import (
 	"flag"
 	"fmt"

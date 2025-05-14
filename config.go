@@ -68,10 +68,10 @@ type ConfigMonitor struct {
 }
 
 type ConfigPolicy struct {
-	Service          VersionPolicy   `sconf:"optional" sconf-doc:"Policy for updating when a new version of the monitored service is discovered."`
-	Self             VersionPolicy   `sconf:"optional" sconf-doc:"Policy for updating when a new version of ysco is discovered."`
-	ServiceToolchain GoVersionPolicy `sconf:"optional" sconf-doc:"Policy for updating the monitored service when a new Go toolchain is discovered."`
-	SelfToolchain    GoVersionPolicy `sconf:"optional" sconf-doc:"Policy for updating ysco when a new Go toolchain is discovered."`
+	Service          VersionPolicy   `sconf:"optional" sconf-doc:"Policy for updating when a new version of the monitored service is discovered. Values: patch, minor, manual."`
+	Self             VersionPolicy   `sconf:"optional" sconf-doc:"Policy for updating when a new version of ysco is discovered. Values: patch, minor, manual."`
+	ServiceToolchain GoVersionPolicy `sconf:"optional" sconf-doc:"Policy for updating the monitored service when a new Go toolchain is discovered. Values: patch, minor, manual, supported, follow."`
+	SelfToolchain    GoVersionPolicy `sconf:"optional" sconf-doc:"Policy for updating ysco when a new Go toolchain is discovered. Values: patch, minor, manual, supported, follow."`
 }
 
 type ConfigUpdate struct {

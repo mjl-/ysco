@@ -1,82 +1,11 @@
 package main
 
 import (
-	"bytes"
-	"errors"
 	"fmt"
-	"io"
-	"io/fs"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 )
-
-type Which string
-
-const (
-	Svc  Which = "svc"
-	Self Which = "self"
-)
-
-type Update struct {
-	Time      time.Time // Time at which update can be done.
-	Which     Which     // "svc" or "self"
-	ModPath   string    // E.g. "github.com/mjl-/moxtools"
-	PkgDir    string    // E.g. "/" or "/cmd/somecommand".
-	Version   string    // E.g. "v0.1.2"
-	GoVersion string    // E.g. "go1.23.2"
-}
-
-func parseScheduledTxt(r io.Reader) (l []Update, rerr error) {
-	text, err := io.ReadAll(r)
-	if err != nil {
-		return nil, fmt.Errorf("read: %v", err)
-	}
-	for _, e := range strings.Split(strings.TrimRight(string(text), "\n"), "\n") {
-		t := strings.Split(e, " ")
-		if len(t) != 6 {
-			return nil, fmt.Errorf("bad line %q", e)
-		}
-		tm, err := time.Parse(time.RFC3339, t[0])
-		if err != nil {
-			return nil, fmt.Errorf("parsing time: %v", err)
-		}
-		switch t[1] {
-		case "self", "svc":
-		default:
-			return nil, fmt.Errorf("parsing which, got %q", t[1])
-		}
-		l = append(l, Update{tm, Which(t[1]), t[2], t[3], t[4], t[5]})
-	}
-	return l, nil
-}
-
-func readScheduledTxt() ([]Update, error) {
-	buf, err := os.ReadFile(filepath.Join(cacheDir, "scheduled.txt"))
-	if err != nil {
-		return nil, fmt.Errorf("read scheduled.txt: %w", err)
-	}
-	return parseScheduledTxt(bytes.NewReader(buf))
-}
-
-func writeScheduledTxt(l []Update) error {
-	if len(l) == 0 {
-		err := os.Remove(filepath.Join(cacheDir, "scheduled.txt"))
-		if err != nil && errors.Is(err, fs.ErrNotExist) {
-			err = nil
-		}
-		return err
-	}
-	var b bytes.Buffer
-	for _, u := range l {
-		if _, err := fmt.Fprintf(&b, "%s %s %s %s %s %s\n", u.Time.Format(time.RFC3339), u.Which, u.ModPath, u.PkgDir, u.Version, u.GoVersion); err != nil {
-			return fmt.Errorf("write: %v", err)
-		}
-	}
-	return os.WriteFile(filepath.Join(cacheDir, "scheduled.txt"), b.Bytes(), 0600)
-}
 
 type Schedule []dayHour
 

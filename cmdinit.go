@@ -114,6 +114,11 @@ func cmdInit(args []string) {
 	err = os.WriteFile("ys/password.txt", []byte(password+"\n"), 0600)
 	xcheckf(err, "writing password file")
 
+	ysDir = "ys"
+	state = &State{}
+	err = state.write()
+	xcheckf(err, "writing state.json")
+
 	cf, err := os.Create("ys/ysco.conf")
 	xcheckf(err, "create config file")
 	cfg := Config{
@@ -131,5 +136,5 @@ func cmdInit(args []string) {
 	}
 
 	log.Printf("initialized ys/, created symlinks ysco and %s, admin interface will be at http://admin:%s@localhost:1234/ after starting:", shortname, password)
-	log.Printf("./ysco run -addr localhost:1234 ./%s #[flags]", shortname)
+	log.Printf("./ysco run -addr localhost:1234 ./%s # [flags]", shortname)
 }

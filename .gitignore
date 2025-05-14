@@ -7,6 +7,8 @@
 /testdata/gocache/*
 /testdata/gocache-root/*
 /testdata/run/ys/gobuildverifiercache/
+/testdata/run/ys/state.json
 /testdata/run/moxtools*
 /testdata/run-root/ys/gobuildverifiercache/
+/testdata/run-root/ys/state.json
 /testdata/run-root/moxtools*

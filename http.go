@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	htmltemplate "html/template"
-	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -29,12 +28,12 @@ var faviconIco embed.FS
 var indexHTML string
 
 var indextempl = htmltemplate.Must(htmltemplate.New("index.html").Funcs(htmltemplate.FuncMap{
-	"tagURL": tagURL,
+	"tagURL": guessTagURL,
 }).Parse(indexHTML))
 
-// tagURL returns a guessed url to the tag in source control that may contain
+// guessTagURL returns a guessed url to the tag in source control that may contain
 // release notes, but may also be an incorrect url.
-func tagURL(modpath, version string) string {
+func guessTagURL(modpath, version string) string {
 	var repoURL, tagURL string
 
 	if semver.Prerelease(version) != "" {
@@ -87,8 +86,8 @@ type indexArgs struct {
 	UpdateBusy        bool
 	PauseReason       string
 	Scheduled         []Update
-	OldBinariesSelf   []string
-	OldBinariesSvc    []string
+	Backoff           int
+	BackoffReason     string
 	SvcVersionsError  string
 	SvcVersions       []string
 	SelfVersionsError string
@@ -103,21 +102,15 @@ type indexArgs struct {
 }
 
 func gatherIndexArgs() (indexArgs, error) {
-	schedule.Lock()
-	scheduled := slices.Clone(schedule.updates)
-	schedule.Unlock()
-
-	updating.Lock()
-	updateBusy := updating.busy
-	pauseReason := updating.pauseReason
-	svcinfo := updating.svcinfo
-	selfinfo := updating.selfinfo
-	updating.Unlock()
-
-	oldBinaries.Lock()
-	oldbinsself := slices.Clone(oldBinaries.Self)
-	oldbinssvc := slices.Clone(oldBinaries.Svc)
-	oldBinaries.Unlock()
+	state.Lock()
+	schedule := slices.Clone(state.Schedule)
+	backoff := state.Backoff
+	backoffReason := state.BackoffReason
+	updateBusy := state.updateBusy
+	pauseReason := state.PauseReason
+	svcinfo := state.svcinfo
+	selfinfo := state.selfinfo
+	state.Unlock()
 
 	// todo: do lookups in goroutines.
 
@@ -187,9 +180,9 @@ func gatherIndexArgs() (indexArgs, error) {
 		selfinfo.GoVersion,
 		updateBusy,
 		pauseReason,
-		scheduled,
-		oldbinsself,
-		oldbinssvc,
+		schedule,
+		backoff,
+		backoffReason,
 		svcversionsError,
 		svcversions,
 		selfversionsError,
@@ -283,29 +276,21 @@ func handleIndexPost(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case "pause":
-		updating.Lock()
-		reason := "manually paused"
-		err := os.WriteFile(filepath.Join(cacheDir, "pause.txt"), []byte(reason), 0640)
-		if err != nil {
-			httpErrorf(w, r, http.StatusInternalServerError, "writing pause.txt: %v", err)
-			return
-		}
-		updating.pauseReason = reason
+		state.Lock()
+		state.PauseReason = "manually paused"
+		state.write()
 		metricUpdatesPaused.Set(1)
-		updating.Unlock()
 		slog.Info("paused updates")
+		state.Unlock()
 
 	case "unpause":
-		updating.Lock()
-		err := os.Remove(filepath.Join(cacheDir, "pause.txt"))
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			httpErrorf(w, r, http.StatusInternalServerError, "removing pause.txt: %v", err)
-			return
-		}
-		updating.pauseReason = ""
+		state.Lock()
+		state.PauseReason = ""
+		state.write()
 		metricUpdatesPaused.Set(0)
-		updating.Unlock()
 		slog.Info("unpaused updates")
+		state.reschedule()
+		state.Unlock()
 
 	case "update":
 		which := Which(r.FormValue("which"))
@@ -316,21 +301,25 @@ func handleIndexPost(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		var info *debug.BuildInfo
-		updating.Lock()
+		var info debug.BuildInfo
+		state.Lock()
 		if which == Self {
-			info = updating.selfinfo
+			info = state.selfinfo
 		} else {
-			info = updating.svcinfo
+			info = state.svcinfo
 		}
-		updating.Unlock()
+		if state.scheduleRemoveWhich(which) {
+			state.write()
+			state.reschedule()
+		}
+		state.Unlock()
 
 		var respWriter http.ResponseWriter
 		if which == Self {
 			respWriter = w
 		}
 		// note: if which is Self, and the update is successful, the process is replaced and this won't return.
-		if err := update(which, info.Main.Path, version, goversion, nil, respWriter, true, true); err != nil {
+		if err := update(which, info.Main.Path, version, goversion, nil, respWriter, true); err != nil {
 			if errors.Is(err, errUpdateBusy) {
 				httpErrorf(w, r, http.StatusBadRequest, "update busy")
 			} else {
@@ -348,9 +337,9 @@ func handleIndexPost(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// We hold the lock until execSelf.
-		updating.Lock()
-		busy := updating.busy
-		defer updating.Unlock()
+		state.Lock()
+		defer state.Unlock()
+		busy := state.updateBusy
 		if busy {
 			httpErrorf(w, r, http.StatusBadRequest, "updating in progress, cannot reload")
 			return
@@ -389,7 +378,7 @@ func handleIndexPost(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// If successful, execSelf does not return.
-		err = execSelf(true, w, true)
+		err = state.execSelf(true, w, true)
 		httpErrorf(w, r, http.StatusInternalServerError, "reloading after config change: %v", err)
 		return
 
@@ -442,15 +431,19 @@ func handleUpdate(w http.ResponseWriter, r *http.Request) {
 		httpErrorf(w, r, http.StatusBadRequest, "missing version or goversion or missing/invalid 'which'")
 		return
 	}
-	updating.Lock()
-	var info *debug.BuildInfo
+	state.Lock()
+	var info debug.BuildInfo
 	if which == Self {
-		info = updating.selfinfo
+		info = state.selfinfo
 	} else {
-		info = updating.svcinfo
+		info = state.svcinfo
 	}
-	updating.Unlock()
-	lversion, lgoversion := latest(which, info)
+	if state.scheduleRemoveWhich(which) {
+		state.write()
+		state.reschedule()
+	}
+	lversion, lgoversion := state.latest(which, info)
+	state.Unlock()
 
 	if version == "latest" {
 		versions, err := lookupModuleVersions(slog.Default(), info.Main.Path)
@@ -499,7 +492,7 @@ func handleUpdate(w http.ResponseWriter, r *http.Request) {
 		respWriter = w
 	}
 	// note: if which is Self, and the update successful, the process is replaced and never returns.
-	if err := update(which, info.Main.Path, version, goversion, nil, respWriter, false, true); err != nil {
+	if err := update(which, info.Main.Path, version, goversion, nil, respWriter, false); err != nil {
 		if errors.Is(err, errUpdateBusy) {
 			httpErrorf(w, r, http.StatusBadRequest, "update busy")
 		} else {

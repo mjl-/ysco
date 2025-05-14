@@ -47,6 +47,9 @@ fieldset { border: 0; }
 	{{ end }}
 
 		<h2>Scheduled updates</h2>
+	{{ if .Backoff }}
+		<p>Backing off on updates after {{ .Backoff }} failures, last error: {{ .BackoffReason }}</p>
+	{{ end }}
 	{{ if .Scheduled }}
 		<p>According to policy, time of discovery and update schedule:</p>
 		<table>
@@ -212,21 +215,6 @@ fieldset { border: 0; }
 	{{ end }}
 		</ul>
 {{ end }}
-
-		<h2>Old binaries</h2>
-	{{ if and (not .OldBinariesSelf) (not .OldBinariesSvc) }}
-		<p>No old binaries scheduled for cleanup.</p>
-	{{ else }}
-		<p>Binaries scheduled for cleanup after next successful update:</p>
-		<ul>
-		{{ range $path := .OldBinariesSelf }}
-			<li>{{ $path }}</li>
-		{{ end }}
-		{{ range $path := .OldBinariesSvc }}
-			<li>{{ $path }}</li>
-		{{ end }}
-		</ul>
-	{{ end }}
 
 		<h2>Configuration</h2>
 		<p>Started as: {{ .Argv }}</p>

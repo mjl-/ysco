@@ -147,6 +147,7 @@ func TestIntegration(t *testing.T) {
 	err = resp.Body.Close()
 	tcheck(err, "close http body")
 
+	time.Sleep(time.Second)
 	getState()
 	tcompare(state.SvcVersion, "v0.0.4")
 	tcompare(state.SvcGoVersion, "go1.23.8")
@@ -168,6 +169,7 @@ func TestIntegration(t *testing.T) {
 	err = resp.Body.Close()
 	tcheck(err, "close http body")
 
+	time.Sleep(time.Second)
 	getState()
 	tcompare(state.SvcVersion, "v0.0.5")
 	tcompare(state.SvcGoVersion, "go1.24.2")
@@ -182,6 +184,7 @@ func TestIntegration(t *testing.T) {
 	err = resp.Body.Close()
 	tcheck(err, "close http body")
 
+	time.Sleep(time.Second)
 	getState()
 	tcompare(state.SelfVersion, "v0.9.8")
 	tcompare(state.SelfGoVersion, "go1.24.2")
@@ -196,6 +199,7 @@ func TestIntegration(t *testing.T) {
 	err = resp.Body.Close()
 	tcheck(err, "close http body")
 
+	time.Sleep(time.Second)
 	getState()
 	tcompare(state.SelfVersion, "v0.9.9")
 	tcompare(state.SelfGoVersion, "go1.24.2")
@@ -210,6 +214,7 @@ func TestIntegration(t *testing.T) {
 	err = resp.Body.Close()
 	tcheck(err, "close http body")
 
+	time.Sleep(time.Second)
 	getState()
 	tcompare(state.SelfVersion, "v0.9.8")
 	tcompare(state.SelfGoVersion, "go1.23.8")

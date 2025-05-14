@@ -22,6 +22,7 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	"runtime/debug"
 )
 
 var listen string
@@ -41,7 +42,8 @@ func main() {
 		w.Header().Set("Cache-Control", "max-age=0")
 		handler.ServeHTTP(w, r)
 	})
-	log.Println("starting webserver on", listen)
+	info, _ := debug.ReadBuildInfo()
+	log.Println("starting webserver on", listen, "version", info.Main.Version, "goversion", info.GoVersion)
 	if certfile != "" || keyfile != "" {
 		log.Fatal(http.ListenAndServeTLS(listen, certfile, keyfile, nil))
 	} else {

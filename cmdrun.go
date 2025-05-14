@@ -17,11 +17,8 @@ package main
 Files we use:
 - ys/
 	- ysco.conf, config file.
-	- password.txt, default file for admin web interface .
-	- scheduled.txt, lines with scheduled updates.
-	- pause.txt, only present if we aren't currently automatically updating, e.g. after an error during an update.
-	- old-binaries-svc.txt, old binaries for the service that we will remove on the next update.
-	- old-binaries-self.txt, for binaries for ysco itself.
+	- password.txt, contains password admin web interface.
+	- state.json, lines with scheduled updates.
 	- gobuildverifiercache/..., transparency log files, for downloading binaries.
 */
 
@@ -36,6 +33,7 @@ import (
 	"io/fs"
 	"log"
 	"log/slog"
+	mathrand "math/rand/v2"
 	"net"
 	"net/http"
 	"os"
@@ -60,15 +58,11 @@ import (
 )
 
 // Command-line flags.
-var ysDir string // For config, verifier cache and state files like pause.txt, scheduled.txt and old-binaries-{self,svc}.txt.
-var addr string
-var adminAddr string
-var metricsAddr string
+var ysDir string    // For config, verifier cache and state file.
 var username string // If set, we must be called as root and we'll start the process as this user. If group is not set explicitly, all groups of the user are set. If not a username, then interpreted as uid.
 var groups string   // Only set this group (or comma-separated groups) when starting the process.
 
 var logLevel slog.LevelVar
-var cacheDir string // ysDir plus "gobuildverifiercache"
 
 var cmdArgs []string // argv for starting service.
 
@@ -76,63 +70,156 @@ var cmdArgs []string // argv for starting service.
 var userID, groupID uint32
 var groupIDs []uint32 // All groups, including primary group.
 
-var updating struct {
-	sync.Mutex
-
-	// Whether we are still in an update. New updates will be rejected with an error.
-	// Cleared 5 seconds after new process is started.
-	busy bool
-
-	// Time of start of updated process. Used to recognize quick failure after updating
-	// the service, causing us to rollback.
-	started time.Time
-
-	// Whether we rolled back the last update. If so, we won't try to rollback
-	// again on command failure.
-	rolledback bool
-
-	// Active service process, to forward signals to, and send sigterm to when updating.
-	process *os.Process
+// State is stored in $ysDir/state.json. It also has private fields only used
+// during runtime. Access is protected through the mutex. Private methods must only
+// be called with the lock held.
+type State struct {
+	// private methods on State require holding the lock.
+	sync.Mutex `json:"-"`
 
 	// If non-empty, we are not currently doing automatic updates due to earlier
 	// failure to update. Cleared after successful (e.g. manual) update.
-	pauseReason string
+	PauseReason string
 
-	// Current service & self build info, read from files.
-	svcinfo  *debug.BuildInfo
-	selfinfo *debug.BuildInfo
+	// All pending updates. When looking for next updates, we compare against the
+	// latest (last) that we've already planned, not necessarily the current version.
+	Schedule []Update
 
-	// Of previous binary, set when doing an update, for rollback.
-	svcinfoPrev       *debug.BuildInfo
-	binaryPathPrevAbs string
-}
-
-var schedule struct {
-	sync.Mutex
-
-	// Fires when we can update.
-	timer *time.Timer
+	// Previous binaries. We remove them when setting a new previous binary.
+	PreviousBinarySvc  string
+	PreviousBinarySelf string
 
 	// Number of times we backed off. Each time we double number of hours delay (while
 	// staying within update schedule. Cleared when we do a manual update and after
 	// success.
-	backoff int
+	Backoff int
 
-	// All pending updates. When looking for next updates, we compare against the
-	// latest (last) that we've already planned.
-	updates []Update
+	// Reason we are doing backoff, e.g. error message.
+	BackoffReason string
 
-	// Update currently planned for installing when timer expires, if any. Will
-	// be checked again against schedule.updates when timer triggers.
-	up *Update
+	// Fields above are exported and stored in state.json. Fields below are ephemeral.
+
+	// If true, we are either waiting for the current old process to stop, or in the
+	// first 5s after restarting the new service.
+	updateBusy bool
+
+	// Whether we rolled back the last update. If so, we won't try to rollback
+	// again on command failure.
+	rolledBack bool
+
+	// Time of start of updated process. Used to recognize quick failure after updating
+	// the service, causing us to rollback.
+	processStarted time.Time
+
+	// Active service process, to forward signals to, and send sigterm to when state.
+	process *os.Process
+
+	// Current service & self build info, read from files.
+	svcinfo  debug.BuildInfo
+	selfinfo debug.BuildInfo
+
+	// Of previous binary, set when doing an update, for rollback.
+	svcinfoPrev *debug.BuildInfo
+
+	// Of new binary. Set when we before terminating the current process, and picked up
+	// when it has terminated.
+	svcNext *downloadResult
+
+	// Fires when we can update.
+	scheduleTimer *time.Timer
 }
 
-// In-memory state of old-binaries-{self,svc}.txt. Read at startup, written
-// whenever changes are made.
-var oldBinaries struct {
-	sync.Mutex
-	Self []string
-	Svc  []string
+type Which string
+
+const (
+	Svc  Which = "svc"
+	Self Which = "self"
+)
+
+type Update struct {
+	Time      time.Time // Time at which update can be done.
+	Which     Which     // "svc" or "self"
+	ModPath   string    // E.g. "github.com/mjl-/moxtools"
+	PkgDir    string    // E.g. "/" or "/cmd/somecommand".
+	Version   string    // E.g. "v0.1.2"
+	GoVersion string    // E.g. "go1.23.2"
+}
+
+func makeUpdate(which Which, info debug.BuildInfo) Update {
+	return Update{
+		time.Time{},
+		which,
+		info.Main.Path,
+		packageDir(info),
+		info.Main.Version,
+		info.GoVersion,
+	}
+}
+
+func (up Update) Equal(o Update) bool {
+	return up.Time.UTC().Round(0).Equal(o.Time.UTC().Round(0)) && up.Which == o.Which && up.ModPath == o.ModPath && up.PkgDir == o.PkgDir && up.Version == o.Version && up.GoVersion == o.GoVersion
+}
+
+var state *State
+
+// read state from $ysDir/state.json.
+func readState() (*State, error) {
+	p := filepath.Join(ysDir, "state.json")
+	f, err := os.Open(p)
+	if err != nil && errors.Is(err, os.ErrNotExist) {
+		var state State
+		slog.Info("wrote initial state.json file")
+		return &state, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("open %q: %v", p, err)
+	}
+	var state State
+	err = json.NewDecoder(f).Decode(&state)
+	return &state, err
+}
+
+// write state to $ysDir/state.json.
+func (st *State) write() (rerr error) {
+	defer func() {
+		if rerr != nil {
+			slog.Error("writing state", "err", rerr)
+		}
+	}()
+
+	p := filepath.Join(ysDir, "state.json")
+	f, err := os.CreateTemp(ysDir, "state.json-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp file: %v", err)
+	}
+	tmpName := f.Name()
+	defer func() {
+		if f != nil {
+			if err := f.Close(); err != nil {
+				log.Printf("close created temp file: %v", err)
+			}
+		}
+		if tmpName != "" {
+			if err := os.Remove(tmpName); err != nil {
+				log.Printf("remove temp file: %v", err)
+			}
+		}
+	}()
+
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", "\t")
+	if err := enc.Encode(st); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		f = nil
+		return err
+	}
+	f = nil
+	err = os.Rename(tmpName, p)
+	if err == nil {
+		tmpName = ""
+	}
+	return err
 }
 
 // For doing next periodic check for updates.
@@ -158,14 +245,16 @@ func cmdRun(args []string) {
 	// likely in some system supervisor service config file, so would come back after
 	// the supervisor restarts ysco).
 
+	var addr string
+	var adminAddr string
+	var metricsAddr string
+
 	flg.StringVar(&ysDir, "dir", "ys", "directory with config file, state files and transparency log cache")
 	flg.StringVar(&username, "user", "", "username/uid to run command as")
 	flg.StringVar(&groups, "groups", "", "comma-separated groups/gids to run command as, overriding additional groups of system user")
 	flg.StringVar(&addr, "addr", "", "address to webserve admin and metrics interfaces; cannot be used together with adminaddr and metricsaddr")
 	flg.StringVar(&adminAddr, "adminaddr", "", "if non-empty, address to serve only admin webserver; also see -addr; see -adminauthfile for requiring authentication")
 	flg.StringVar(&metricsAddr, "metricsaddr", "", "if non-empty, address to serve only metrics webserver; also see -addr")
-
-	cacheDir = filepath.Join(ysDir, "gobuildverifiercache")
 
 	flg.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: ysco run [flags] cmd ...")
@@ -267,7 +356,7 @@ func cmdRun(args []string) {
 	xcheckf(err, "new tlog client")
 
 	if !filepath.IsAbs(cmdArgs[0]) && !strings.HasPrefix(cmdArgs[0], "./") && !strings.HasPrefix(cmdArgs[0], "../") {
-		log.Fatalf("command path must be explicit path (absolute, or relative from current dir)")
+		log.Fatalf("command path must be explicit path (absolute, or relative starting with ./ or ../)")
 	}
 
 	slogOpts := slog.HandlerOptions{
@@ -331,20 +420,22 @@ func cmdRun(args []string) {
 		}
 	}
 
-	// Read module & version from binary.
+	state, err = readState()
+	xcheckf(err, "read state")
+
+	// Read module & version from binaries.
 	svcinfo, err := buildinfo.ReadFile(cmdArgs[0])
 	xcheckf(err, "reading buildinfo from command")
-	var ok bool
 	selfinfo, ok := debug.ReadBuildInfo()
 	if !ok {
 		log.Fatalf("could not get buildinfo for own binary")
 	}
-	updating.svcinfo = svcinfo
-	updating.selfinfo = selfinfo
+	state.svcinfo = *svcinfo
+	state.selfinfo = *selfinfo
 
 	slog.Info("ysco starting", "version", selfinfo.Main.Version+"/"+selfinfo.GoVersion, "svc", svcinfo.Path, "svcversion", svcinfo.Main.Version+"/"+svcinfo.GoVersion, "adminaddr", adminAddr, "metricsaddr", metricsAddr, "goos", runtime.GOOS, "goarch", runtime.GOARCH)
-	slog.Debug("service info", "modpath", svcinfo.Main.Path, "pkgdir", packageDir(svcinfo), "version", svcinfo.Main.Version, "goversion", svcinfo.GoVersion)
-	slog.Debug("self info", "modpath", selfinfo.Main.Path, "pkgdir", packageDir(selfinfo), "version", selfinfo.Main.Version, "goversion", selfinfo.GoVersion)
+	slog.Debug("service info", "modpath", svcinfo.Main.Path, "pkgdir", packageDir(state.svcinfo), "version", svcinfo.Main.Version, "goversion", svcinfo.GoVersion)
+	slog.Debug("self info", "modpath", selfinfo.Main.Path, "pkgdir", packageDir(state.selfinfo), "version", selfinfo.Main.Version, "goversion", selfinfo.GoVersion)
 	slog.Debug("starting service", "cmd", cmdArgs)
 
 	metricSelfVersion.WithLabelValues(selfinfo.Main.Version).Set(1)
@@ -355,20 +446,6 @@ func cmdRun(args []string) {
 	if (svcinfo.Main.Version == "" || svcinfo.Main.Version == "(devel)") && fallback(config.Policy.Service, defaults.Policy.Service) != VersionManual {
 		slog.Warn("version of module unknown, cannot compare versions for updates")
 	}
-
-	if buf, err := os.ReadFile(filepath.Join(cacheDir, "pause.txt")); err == nil {
-		updating.pauseReason = string(buf)
-		if updating.pauseReason == "" {
-			updating.pauseReason = "(no reason)"
-		}
-		metricUpdatesPaused.Set(1)
-		slog.Warn("automatic updates paused due to existence of pause.txt", "reason", updating.pauseReason)
-	}
-
-	oldBinaries.Self, err = listOldBinaries("old-binaries-self.txt")
-	xcheckf(err, "reading old-binaries-self.txt")
-	oldBinaries.Svc, err = listOldBinaries("old-binaries-svc.txt")
-	xcheckf(err, "reading old-binaries-svc.txt")
 
 	// Possibly a shared handler for admin & metrics.
 	adminHandler := http.NewServeMux()
@@ -423,14 +500,17 @@ func cmdRun(args []string) {
 		}
 	}
 
-	if l, err := readScheduledTxt(); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		xcheckf(err, "read scheduled.txt")
-	} else {
-		schedule.updates = l
+	if state.PauseReason != "" {
+		metricUpdatesPaused.Set(1)
+		slog.Warn("automatic updates paused", "reason", state.PauseReason)
 	}
-	schedule.timer = time.NewTimer(0)
-	schedule.timer.Stop()
-	reschedule()
+
+	if len(state.Schedule) > 0 && state.scheduleRemoveUpdate(makeUpdate(Self, state.selfinfo)) {
+		state.write()
+	}
+	state.scheduleTimer = time.NewTimer(0)
+	state.scheduleTimer.Stop()
+	state.reschedule()
 
 	signalc := make(chan os.Signal, 1)
 	signal.Notify(signalc, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGUSR1, syscall.SIGUSR2)
@@ -438,11 +518,11 @@ func cmdRun(args []string) {
 	if statestr := os.Getenv("_YSCO_EXEC"); statestr != "" {
 		pickupProcess(statestr)
 	} else {
-		startProcess()
+		state.startProcess()
 	}
 
 	// Wait for service process to finish, and send result to main loop (below).
-	p := updating.process
+	p := state.process
 	go func() {
 		state, err := p.Wait()
 		waitc <- waitResult{state, err}
@@ -465,31 +545,31 @@ func cmdRun(args []string) {
 		case sig := <-signalc:
 			// Pass signals on to the service process.
 			slog.Debug("signal for service", "signal", sig)
-			updating.Lock()
-			err := updating.process.Signal(sig)
+			state.Lock()
+			err := state.process.Signal(sig)
 			if err != nil {
 				slog.Error("sending signal to process", "sig", sig, "err", err)
 			}
-			updating.Unlock()
+			state.Unlock()
 
 		// We are ready to install an update according to our scheduled updates.
-		case <-schedule.timer.C:
+		case <-state.scheduleTimer.C:
 			updateUpcoming()
 
 		// When the service command exits, we get its process state. If we are updating, we
 		// restart the service, now with the new binary. If we weren't updating, we just
 		// quit and let whoever supervises us restart us.
 		case result := <-waitc:
-			state, err := result.state, result.err
-			if state != nil {
-				usage := state.SysUsage()
+			rstate, err := result.state, result.err
+			if rstate != nil {
+				usage := rstate.SysUsage()
 				ru, ok := usage.(*syscall.Rusage)
 				if !ok {
 					slog.Error("rusage after command is not *syscall.Rusage but %T", usage)
 				} else {
-					updating.Lock()
-					start := updating.started
-					updating.Unlock()
+					state.Lock()
+					start := state.processStarted
+					state.Unlock()
 					slog.Debug("service finished, resources used",
 						"duration", time.Since(start),
 						"utime", ru.Utime,
@@ -514,29 +594,62 @@ func cmdRun(args []string) {
 			} else {
 				slog.Debug("command finished", "err", err)
 			}
-			updating.Lock()
-			if updating.busy {
+			state.Lock()
+			if state.svcNext != nil {
 				// todo: recognize if the exit was actually due to the update?
-				var xerr error
-				updating.svcinfo, xerr = buildinfo.ReadFile(cmdArgs[0])
-				xcheckf(xerr, "reading newbuildinfo from command")
 
-				slog.Debug("updating, command finished, starting again", "err", err)
-				updating.started = time.Now()
-				updating.rolledback = false
+				// Whether success or failure, we won't be trying this same update again.
+				state.scheduleRemoveUpdate(makeUpdate(Svc, state.svcinfo))
+				state.write()
 
-				startProcess()
-				p := updating.process
-				updating.Unlock()
+				dr := state.svcNext
+				state.svcNext = nil
+				prevPathAbs, err := state.installBinary(dr.versionPath, dr.destPath, dr.originfo)
+				if err != nil {
+					slog.Error("installing new binary", "err", err)
+					if err := os.Remove(dr.versionPath); err != nil {
+						slog.Error("removing new binary after error", "err", err)
+					}
+					state.Backoff++
+					state.BackoffReason = fmt.Sprintf("installing new binary: %v", err)
+					state.write()
+					continue
+				}
+				if state.PreviousBinarySvc != "" && state.PreviousBinarySvc != prevPathAbs && !isCurrentBinary(cmdArgs[0], state.PreviousBinarySvc) {
+					slog.Info("removing previous service binary", "path", state.PreviousBinarySvc)
+					if err := os.Remove(state.PreviousBinarySvc); err != nil {
+						slog.Warn("removing previous binary", "err", err, "path", state.PreviousBinarySvc)
+					}
+				}
+				state.PreviousBinarySvc = prevPathAbs
+				state.write()
+
+				state.svcinfoPrev = &state.svcinfo
+				state.svcinfo = dr.newinfo
+
+				metricSvcVersion.Reset()
+				metricSvcGoVersion.Reset()
+				metricSvcVersion.WithLabelValues(state.svcinfo.Main.Version).Set(1)
+				metricSvcGoVersion.WithLabelValues(state.svcinfo.GoVersion).Set(1)
+
+				state.startProcess()
+				p := state.process
+				state.Unlock()
 
 				// After 5 seconds, mark as no longer updating and reschedule for possible next
 				// update.
 				go func() {
 					time.Sleep(5 * time.Second)
 					slog.Debug("clearing busy after 5s")
-					updating.Lock()
-					updating.busy = false
-					updating.Unlock()
+					state.Lock()
+					state.updateBusy = false
+					if state.Backoff > 0 {
+						state.Backoff = 0
+						state.BackoffReason = ""
+						state.write()
+					}
+					state.reschedule()
+					state.Unlock()
 					slog.Debug("busy cleared")
 				}()
 
@@ -547,10 +660,10 @@ func cmdRun(args []string) {
 
 				continue
 			}
-			updating.Unlock()
 			if err != nil {
 				// handleExit either quits or starts the service again, possibly after a rollback.
-				handleExit("wait", err)
+				state.handleExit("wait", err)
+				state.Unlock()
 			} else {
 				slog.Info("service process finished without error, quitting")
 				os.Exit(0)
@@ -559,16 +672,41 @@ func cmdRun(args []string) {
 	}
 }
 
-// reschedule writes schedule.txt and resets schedule.timer if needed.
-//
-// schedule lock must be held by caller.
-func reschedule() {
-	if err := writeScheduledTxt(schedule.updates); err != nil {
-		slog.Error("update scheduled.txt", "err", err)
+func isCurrentBinary(name, p string) bool {
+	if fi, err := os.Lstat(name); err != nil {
+		return false
+	} else if fi.Mode()&os.ModeSymlink != 0 {
+		name, err = os.Readlink(name)
+		if err != nil {
+			return false
+		}
 	}
+	name, err := filepath.Abs(name)
+	if err != nil {
+		return false
+	}
+	return name == p
+}
 
+// remove an update from the schedule, its fields must match an scheduled update except for its Time field.
+// caller should call st.write() to write the change to disk.
+func (st *State) scheduleRemoveUpdate(up Update) (removed bool) {
+	for i, e := range st.Schedule {
+		up.Time = e.Time
+		if e.Equal(up) {
+			copy(st.Schedule[i:], st.Schedule[i+1:])
+			st.Schedule = st.Schedule[:len(st.Schedule)-1]
+			return true
+		}
+	}
+	return false
+}
+
+// reschedule resets st.scheduleTimer based on scheduled updates.
+func (st *State) reschedule() {
+	// Update metrics with scheduled updates.
 	var nself, nsvc float64
-	for _, l := range schedule.updates {
+	for _, l := range st.Schedule {
 		if l.Which == Self {
 			nself++
 		} else {
@@ -578,98 +716,58 @@ func reschedule() {
 	metricSelfUpdateScheduled.Set(nself)
 	metricSvcUpdateScheduled.Set(nsvc)
 
-	updating.Lock()
-	paused := updating.pauseReason != ""
-	updating.Unlock()
-
-	var up *Update
-	if i := updateUpcomingFindIndex(); i >= 0 {
-		up = &schedule.updates[i]
-	}
-
-	if !paused && up != nil && (schedule.up == nil || up.Time.Before(schedule.up.Time)) {
-		schedule.up = up
-
-		// Take backoff into account, if any.
-		uptm := up.Time
-		var backoff time.Duration
-		for i := range schedule.backoff {
-			if i == 0 {
-				backoff = time.Hour
-			} else {
-				backoff *= 2
-			}
-		}
-		if backoff > 0 {
-			uptm = uptm.Add(backoff)
-			// We need to find the next slot we can do the update.
-			var sched Schedule = fallbackList(config.Update.schedule, defaults.Update.schedule)
-			uptm = sched.Next(uptm)
-		}
-		d := time.Until(uptm)
-
-		jitter := time.Duration(secretRand.Int64N(int64(fallback(config.Update.Jitter, defaults.Update.Jitter)/time.Second))) * time.Second
-		d += jitter
-		d = max(0, d)
-		tm := uptm.Add(d)
-		if tm.After(uptm.Add(time.Hour)) {
-			tm = uptm.Add(time.Hour)
-		}
-		d = max(0, time.Until(tm))
-
-		slog.Info("next update scheduled", "time", uptm, "wait", d, "version", schedule.up.Version, "goversion", schedule.up.GoVersion, "modpath", schedule.up.ModPath, "pkgdir", schedule.up.PkgDir, "which", schedule.up.Which)
-		schedule.timer.Stop()
-		schedule.timer.Reset(d)
-	} else if up == nil && schedule.up != nil {
-		slog.Info("canceling scheduled update")
-		schedule.timer.Stop()
-		schedule.up = nil
-	}
-}
-
-func updateUpcomingFindIndex() int {
-	var up *Update
-	var index = -1
-	for i, p := range schedule.updates {
-		if up == nil || !p.Time.After(up.Time) {
-			up = &schedule.updates[i]
-			index = i
-		}
-	}
-	return index
-}
-
-// updateUpcoming checks if the upcoming update is still current, and starts a
-// goroutine to start the update.
-func updateUpcoming() {
-	schedule.Lock()
-	up := schedule.up
-	curindex := updateUpcomingFindIndex()
-	if up == nil || curindex < 0 || schedule.updates[curindex] != *up {
-		slog.Info("schedule update not current anymore, rescheduling")
-		reschedule()
-		schedule.Unlock()
+	if st.PauseReason != "" || len(st.Schedule) == 0 {
+		st.scheduleTimer.Stop()
 		return
 	}
-	schedule.Unlock()
+
+	up := st.Schedule[0]
+	tm := up.Time
+	var backoff time.Duration
+	for i := range st.Backoff {
+		if i == 0 {
+			backoff = time.Hour
+		} else {
+			backoff *= 2
+		}
+	}
+	tm = tm.Add(backoff)
+	// Find the next slot we can do the update.
+	var sched Schedule = fallbackList(config.Update.schedule, defaults.Update.schedule)
+	tm = sched.Next(tm)
+	jitter := time.Duration(mathrand.Int64N(int64(fallback(config.Update.Jitter, defaults.Update.Jitter)/time.Second))) * time.Second
+	tm = tm.Add(jitter)
+	d := max(0, time.Until(tm))
+
+	slog.Info("next update scheduled", "time", tm, "wait", d, "version", up.Version, "goversion", up.GoVersion, "modpath", up.ModPath, "pkgdir", up.PkgDir, "which", up.Which)
+	st.scheduleTimer.Stop()
+	st.scheduleTimer.Reset(d)
+}
+
+// updateUpcoming starts the first scheduled update if it still exists, its time has
+// come, and no other update is busy.
+func updateUpcoming() {
+	state.Lock()
+	if len(state.Schedule) == 0 || state.updateBusy {
+		// If currently updating, once the update is done and stable, a next update will be scheduled.
+		state.Unlock()
+		return
+	}
+	// Otherwise, unlocked by updateLocked in goroutine.
+
+	up := state.Schedule[0]
+	if time.Until(up.Time) > 0 {
+		state.reschedule()
+		state.Unlock()
+		return
+	}
 
 	go func() {
-		xup := *up
 		// note: if up.Which is Self, update execs itself and never returns.
-		err := update(up.Which, up.ModPath, up.Version, up.GoVersion, &xup, nil, false, false)
+		err := updateLocked(up.Which, up.ModPath, up.Version, up.GoVersion, &up, nil, false)
 		if err != nil {
-			slog.Error("updating failed", "err", err)
+			slog.Error("update failed", "err", err)
 		}
-
-		schedule.Lock()
-		curindex = updateUpcomingFindIndex()
-		if curindex >= 0 {
-			copy(schedule.updates[curindex:], schedule.updates[curindex+1:])
-			schedule.updates = schedule.updates[:len(schedule.updates)-1]
-		}
-		schedule.up = nil
-		reschedule()
-		schedule.Unlock()
 	}()
 }
 
@@ -690,53 +788,45 @@ func pickupProcess(statestr string) {
 	err = os.Unsetenv("_YSCO_EXEC")
 	xcheckf(err, "clearing _YSCO_EXEC")
 
-	updating.process, err = os.FindProcess(es.Pid)
+	state.process, err = os.FindProcess(es.Pid)
 	xcheckf(err, "finding process by pid")
-	updating.started = es.Start
+	state.processStarted = es.Start
 
-	slog.Info("ysco back after exec", "prev", es.OldVersion, "prevgo", es.OldGoVersion, "new", updating.selfinfo.Main.Version, "newgo", updating.selfinfo.GoVersion, "isconfigchange", es.IsConfigChange)
+	slog.Info("ysco back after exec", "prev", es.OldVersion, "prevgo", es.OldGoVersion, "new", state.selfinfo.Main.Version, "newgo", state.selfinfo.GoVersion, "isconfigchange", es.IsConfigChange)
 
-	// Remove any pause.txt file that would prevent future automatic updates.
-	if !es.IsConfigChange {
-		os.Remove(filepath.Join(cacheDir, "pause.txt"))
-		updating.Lock()
-		updating.pauseReason = ""
-		metricUpdatesPaused.Set(0)
-		updating.Unlock()
+	if es.RequestFD <= 0 {
+		return
 	}
 
-	if es.RequestFD > 0 {
-		f := os.NewFile(es.RequestFD, "requestfd")
-		if f == nil {
-			slog.Error("cannot make file from request fd")
-			return
-		}
+	f := os.NewFile(es.RequestFD, "requestfd")
+	if f == nil {
+		slog.Error("cannot make file from request fd")
+		return
+	}
 
-		// todo: should we know about http/1 vs http/2?
-		body := fmt.Sprintf("updated self from %s %s to %s %s\n", es.OldVersion, es.OldGoVersion, updating.selfinfo.Main.Version, updating.selfinfo.GoVersion)
-		resp := http.Response{
-			StatusCode:    http.StatusOK,
-			ProtoMajor:    1,
-			Header:        http.Header{"Content-Type": []string{"text/plain"}},
-			ContentLength: int64(len(body)),
-			Body:          io.NopCloser(strings.NewReader(body)),
-			Close:         true,
-		}
-		if es.Redirect {
-			resp.StatusCode = http.StatusSeeOther
-			resp.Header.Add("Location", "/")
-		}
-		err := resp.Write(f)
-		if err != nil {
-			slog.Error("write response after exec", "err", err)
-		}
-		if err := f.Close(); err != nil {
-			slog.Error("closing request fd", "err", err)
-		}
+	// todo: should we know about http/1 vs http/2?
+	body := fmt.Sprintf("updated self from %s %s to %s %s\n", es.OldVersion, es.OldGoVersion, state.selfinfo.Main.Version, state.selfinfo.GoVersion)
+	resp := http.Response{
+		StatusCode:    http.StatusOK,
+		ProtoMajor:    1,
+		Header:        http.Header{"Content-Type": []string{"text/plain"}},
+		ContentLength: int64(len(body)),
+		Body:          io.NopCloser(strings.NewReader(body)),
+		Close:         true,
+	}
+	if es.Redirect {
+		resp.StatusCode = http.StatusSeeOther
+		resp.Header.Add("Location", "/")
+	}
+	if err := resp.Write(f); err != nil {
+		slog.Error("write response after exec", "err", err)
+	}
+	if err := f.Close(); err != nil {
+		slog.Error("closing request fd", "err", err)
 	}
 }
 
-func startProcess() {
+func (st *State) startProcess() {
 	slog.Debug("starting command")
 
 	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
@@ -757,11 +847,11 @@ func startProcess() {
 	err := cmd.Start()
 	if err != nil {
 		// handleExit either quits or starts the service again, possibly after a rollback.
-		handleExit("start", err)
+		st.handleExit("start", err)
 		return
 	}
-	updating.started = t0
-	updating.process = cmd.Process
+	st.processStarted = t0
+	st.process = cmd.Process
 	if username != "" {
 		slog.Debug("command started", "uid", userID, "gids", groupIDs)
 	} else {
@@ -769,73 +859,65 @@ func startProcess() {
 	}
 }
 
-func handleExit(when string, err error) {
+func (st *State) handleExit(when string, err error) {
 	slog.Error("command exited with error", "err", err, "when", when)
 	code := 1
 	if xerr, ok := err.(*exec.ExitError); ok {
 		code = xerr.ExitCode()
 	}
 
-	updating.Lock()
-
-	if time.Since(updating.started) >= 5*time.Second {
-		slog.Error("service exited, so will we", "exitcode", code)
+	if time.Since(st.processStarted) >= 5*time.Second {
+		slog.Error("service quit, so will we", "exitcode", code)
 		os.Exit(code)
 	}
-	if updating.rolledback {
-		slog.Error("command exited within 5s after rollback, giving up", "err", err, "exitcode", code)
+	if st.rolledBack {
+		slog.Error("command quit within 5s after rollback, giving up", "err", err, "exitcode", code)
 		os.Exit(code)
 	}
-	updating.rolledback = true
 
-	// Creating pause.txt so we don't try any more automatic updates.
-	binName := fmt.Sprintf("%s-%s-%s", path.Base(updating.svcinfo.Main.Path), updating.svcinfo.Main.Version, updating.svcinfo.GoVersion)
-	updating.pauseReason = fmt.Sprintf("binary %s exited within 5s: %v\n", binName, err)
-	if err := os.WriteFile(filepath.Join(cacheDir, "pause.txt"), []byte(updating.pauseReason), 0640); err != nil {
-		slog.Error("writing pause.txt failed", "err", err)
-	}
+	// We're going to rollback.
+	st.rolledBack = true
+
+	binName := fmt.Sprintf("%s-%s-%s", path.Base(st.svcinfo.Main.Path), st.svcinfo.Main.Version, st.svcinfo.GoVersion)
+	st.PauseReason = fmt.Sprintf("binary %s exited within 5s: %v", binName, err)
+	st.write()
 
 	slog.Error("command exited within 5s after update, will attempt to roll back, and pausing further automatic updates", "err", err)
 	metricSvcUpdateRollback.Inc()
 	metricUpdatesPaused.Set(1)
-	if err := updateRollback(); err != nil {
+	if err := st.rollbackBinary(); err != nil {
 		slog.Error("rollback after failed update failed, giving up", "err", err)
 		os.Exit(code)
 	}
 	slog.Warn("rolled back after failed update, restarting", "err", err)
 
-	startProcess()
-	p := updating.process
-	updating.Unlock()
+	st.startProcess()
+	p := st.process
+
 	go func() {
 		state, err := p.Wait()
 		waitc <- waitResult{state, err}
 	}()
 }
 
-func scheduledCancel(which Which) {
-	schedule.Lock()
-	defer schedule.Unlock()
-
-	schedule.backoff = 0
-
+func (st *State) scheduleRemoveWhich(which Which) (changed bool) {
 	var l []Update
-	for _, u := range schedule.updates {
+	for _, u := range st.Schedule {
 		if u.Which != which {
 			l = append(l, u)
 		}
 	}
-	schedule.updates = l
-	reschedule()
+	if len(st.Schedule) == len(l) {
+		return false
+	}
+	st.Schedule = l
+	return true
 }
 
-func latest(which Which, info *debug.BuildInfo) (version, goversion string) {
-	schedule.Lock()
-	defer schedule.Unlock()
-
-	for i := len(schedule.updates) - 1; i >= 0; i-- {
-		if schedule.updates[i].Which == which {
-			return schedule.updates[i].Version, schedule.updates[i].GoVersion
+func (st *State) latest(which Which, info debug.BuildInfo) (version, goversion string) {
+	for i := len(st.Schedule) - 1; i >= 0; i-- {
+		if st.Schedule[i].Which == which {
+			return st.Schedule[i].Version, st.Schedule[i].GoVersion
 		}
 	}
 	return info.Main.Version, info.GoVersion
@@ -863,10 +945,10 @@ func monitorOne() (rerr error) {
 	// good, because if something is terribly wrong with the updates, the managed
 	// service gets rolled back. We cannot roll back when exec-ing ysco.
 
-	updating.Lock()
-	svcinfo := updating.svcinfo
-	selfinfo := updating.selfinfo
-	updating.Unlock()
+	state.Lock()
+	svcinfo := state.svcinfo
+	selfinfo := state.selfinfo
+	state.Unlock()
 
 	// Update metrics for available go versions.
 	metricSvcGoVersionAvailable.Set(boolGauge(xgoversion.Compare(tc.Cur, svcinfo.GoVersion) > 0))
@@ -902,7 +984,7 @@ func boolGauge(v bool) float64 {
 	return 0
 }
 
-func packageDir(info *debug.BuildInfo) string {
+func packageDir(info debug.BuildInfo) string {
 	pkgdir := strings.TrimPrefix(info.Path, info.Main.Path)
 	if pkgdir == "" {
 		pkgdir = "/"
@@ -910,7 +992,10 @@ func packageDir(info *debug.BuildInfo) string {
 	return pkgdir
 }
 
-func scheduleUpdate(which Which, info *debug.BuildInfo, pol VersionPolicy, poltc GoVersionPolicy, tc Toolchains) (versionAvail, updateAvail bool, rerr error) {
+// scheduleUpdate looks up the latest currently available modules for which, and
+// adds a new update to the schedule according to the policy and any already
+// scheduled updates.
+func scheduleUpdate(which Which, info debug.BuildInfo, pol VersionPolicy, poltc GoVersionPolicy, tc Toolchains) (versionAvail, updateAvail bool, rerr error) {
 	modpath := info.Main.Path
 
 	log := slog.With("modpath", modpath)
@@ -951,17 +1036,19 @@ func scheduleUpdate(which Which, info *debug.BuildInfo, pol VersionPolicy, poltc
 		_, _, updateAvail, _ = policyPickVersion(log, pol, poltc, tc, iv, info.GoVersion, info.GoVersion, versions)
 	}
 
-	// Schedule updates, comparing against current modversion or updates already scheduled.
-	modversion, goversion := latest(which, info)
+	// Schedule updates, comparing against current lversion or updates already scheduled.
+	state.Lock()
+	lversion, lgoversion := state.latest(which, info)
+	state.Unlock()
 
-	v, err := parseVersion(modversion, time.Time{})
+	lv, err := parseVersion(lversion, time.Time{})
 	if err != nil {
 		return false, false, fmt.Errorf("parsing current version: %v", err)
 	}
 
-	log = log.With("refversion", modversion, "refgoversion", goversion)
+	log = log.With("refversion", lversion, "refgoversion", lgoversion)
 
-	nvers, ngovers, update, foundMajor := policyPickVersion(log, pol, poltc, tc, v, goversion, info.GoVersion, versions)
+	nvers, ngovers, update, foundMajor := policyPickVersion(log, pol, poltc, tc, lv, lgoversion, info.GoVersion, versions)
 	if !foundMajor {
 		log.Debug("no matching major version found")
 		return
@@ -976,20 +1063,15 @@ func scheduleUpdate(which Which, info *debug.BuildInfo, pol VersionPolicy, poltc
 	}
 	var sched Schedule = fallbackList(config.Update.schedule, defaults.Update.schedule)
 	next := sched.Next(time.Now().Add(config.Update.Delay))
-	schedule.Lock()
+	state.Lock()
 	if !config.Update.All {
-		// Remove any pending updates for which.
-		var l []Update
-		for _, e := range schedule.updates {
-			if e.Which != which {
-				l = append(l, e)
-			}
-		}
-		schedule.updates = l
+		state.scheduleRemoveWhich(which)
 	}
-	schedule.updates = append(schedule.updates, Update{next, which, modpath, packageDir(info), nvers.Full, ngovers})
-	reschedule()
-	schedule.Unlock()
+	state.Schedule = append(state.Schedule, Update{next, which, modpath, packageDir(info), nvers.Full, ngovers})
+	slices.SortFunc(state.Schedule, func(a, b Update) int { return a.Time.Compare(b.Time) })
+	state.write()
+	state.reschedule()
+	state.Unlock()
 	return
 }
 
@@ -1054,41 +1136,57 @@ var errUpdateBusy = errors.New("update in progress")
 // When updating itself, when respWriter is not nil, its FD is passed to the
 // newly exec-ed process, which will write an http response indicating a
 // successful update.
-func update(which Which, modpath, version, goversion string, up *Update, respWriter http.ResponseWriter, redirect bool, manual bool) (rerr error) {
-	updating.Lock()
-	if updating.busy {
-		updating.Unlock()
+func update(which Which, modpath, version, goversion string, up *Update, respWriter http.ResponseWriter, redirect bool) (rerr error) {
+	state.Lock()
+	if state.updateBusy {
+		state.Unlock()
 		return errUpdateBusy
 	}
+	return updateLocked(which, modpath, version, goversion, up, respWriter, redirect)
+}
 
+// must be called with lock held. will unlock before returning.
+func updateLocked(which Which, modpath, version, goversion string, up *Update, respWriter http.ResponseWriter, redirect bool) (rerr error) {
+	state.updateBusy = true
+	state.rolledBack = false
+	var info debug.BuildInfo
+	if which == Svc {
+		info = state.svcinfo
+	} else {
+		info = state.selfinfo
+	}
+	if up == nil && state.Backoff > 0 {
+		state.Backoff = 0
+		state.BackoffReason = ""
+		state.write()
+	}
+	state.Unlock()
+
+	dr, err := updateDownload(which, info, version, goversion)
+
+	state.Lock()
+	defer state.Unlock()
 	defer func() {
 		if rerr != nil {
-			// Don't register updating error for manually triggered updates. The operator will
-			// know about this, no need to trigger alerts.
-			if !manual {
+			// Only register error in metric for scheduled updates. Operator knows about failures through web interface.
+			if up == nil {
 				metricUpdateError.Inc()
 			}
 		}
-		// For updates of the service, busy is cleared after a grace period. For
-		// self-updates or errors, we clear it now.
-		if which == Self || rerr != nil {
-			updating.Lock()
-			updating.busy = false
-			updating.Unlock()
+
+		// For updates of the service, busy is cleared after a grace period.
+		if !(which == Svc && rerr == nil) {
+			state.updateBusy = false
 		}
+
+		if rerr != nil && up != nil && len(state.Schedule) > 0 && state.Schedule[0].Equal(*up) {
+			state.Backoff++
+			state.BackoffReason = fmt.Sprintf("%v", err)
+			state.write()
+		}
+		state.reschedule()
 	}()
 
-	updating.busy = true
-	updating.rolledback = false
-	var info *debug.BuildInfo
-	if which == Svc {
-		info = updating.svcinfo
-	} else {
-		info = updating.selfinfo
-	}
-	updating.Unlock()
-
-	dr, err := updateDownload(which, info, version, goversion)
 	if err != nil {
 		slog.Error("downloading update",
 			"which", which,
@@ -1097,37 +1195,19 @@ func update(which Which, modpath, version, goversion string, up *Update, respWri
 			"goversion", goversion,
 			"err", err)
 		metricDownloadError.Inc()
-		if up != nil {
-			schedule.Lock()
-			schedule.backoff++
-			reschedule()
-			schedule.Unlock()
-		}
 		return err
 	}
 
-	if up != nil {
-		schedule.Lock()
-		schedule.backoff = 0
-		var l []Update
-		for _, e := range schedule.updates {
-			if e.Which != up.Which || e.Time.After(up.Time) {
-				l = append(l, e)
-			}
-		}
-		schedule.updates = l
-		if err := writeScheduledTxt(schedule.updates); err != nil {
-			slog.Error("update scheduled.txt", "err", err)
-		}
-		schedule.Unlock()
-	}
-
-	if err := updateInstall(which, dr, up == nil, respWriter, redirect); err != nil {
+	if err := state.initiateUpdate(which, dr, respWriter, redirect); err != nil {
 		// Clean up temporary file.
 		if err := os.Remove(dr.tmpName); err != nil {
 			slog.Error("cleaning up temporary file", "err", err, "tmpname", dr.tmpName)
 		}
 		return err
+	}
+	if up != nil && state.scheduleRemoveUpdate(*up) {
+		state.write()
+		state.reschedule()
 	}
 	return nil
 }
@@ -1136,10 +1216,6 @@ type downloadResult struct {
 	// Path that we want to make the binary available as, as a symlink if currently
 	// one, or a regular file otherwise.
 	destPath string
-
-	// Path of previous binary. If destPath is a symlink, this is the path it points
-	// to. Otherwise it's equal to destPath.
-	origBinPathAbs string
 
 	// Temporary filename for the new binary, as returned by updateDownload.
 	tmpName string
@@ -1150,13 +1226,15 @@ type downloadResult struct {
 	versionPath string
 
 	// Of previous/original binary, and new binary.
-	originfo, newinfo *debug.BuildInfo
+	originfo, newinfo debug.BuildInfo
 }
 
 // updateDownload fetches a binary for an update to be installed.
 // The new binary is placed in the same directory as the current binary (after
 // following a potential symlink).
-func updateDownload(which Which, originfo *debug.BuildInfo, version, goversion string) (downloadResult, error) {
+//
+// Not called with state lock held, since this can take a while.
+func updateDownload(which Which, originfo debug.BuildInfo, version, goversion string) (downloadResult, error) {
 	bs := buildSpec{
 		Mod:       originfo.Main.Path,
 		Version:   version,
@@ -1233,15 +1311,6 @@ func updateDownload(which Which, originfo *debug.BuildInfo, version, goversion s
 	}
 	f = nil
 
-	origBinPath, err := filepath.EvalSymlinks(destPath)
-	if err != nil {
-		return downloadResult{}, fmt.Errorf("eval symlinks for dest path: %v", err)
-	}
-	origBinPath, err = filepath.Abs(origBinPath)
-	if err != nil {
-		return downloadResult{}, fmt.Errorf("making original binary path absolute: %v", err)
-	}
-
 	// Copy permission modes (including setuid/setgid/sticky) and possibly uid/gid from previous binary.
 	fi, err := os.Stat(destPath)
 	if err != nil {
@@ -1260,110 +1329,68 @@ func updateDownload(which Which, originfo *debug.BuildInfo, version, goversion s
 		return downloadResult{}, fmt.Errorf("chmod new binary: %v", err)
 	}
 
-	dr := downloadResult{destPath, origBinPath, tmpName, versionPath, originfo, newinfo}
+	dr := downloadResult{destPath, tmpName, versionPath, originfo, *newinfo}
 	// Prevent cleanup.
 	tmpName = ""
 
 	return dr, err
 }
 
-// updateInstall installs an update. If which is Svc, the service is restarted.
-// If which is Self, this function will not return on success because it has
-// exec'ed itself.
-//
-// If manual is true, this update was initiated explicitly by the admin, eg through
-// an HTTP request. Any scheduled updates for the same "which" are removed.
-func updateInstall(which Which, dr downloadResult, manual bool, respWriter http.ResponseWriter, redirect bool) error {
+// initiateUpdate starts updating to a new binary. If which is Self, the binary is
+// installed and this process execs itself.
+// If which is Svc, the new binary is stored in the state and the current process
+// terminated with a signal. Once the process has quit, the main loop (elsewhere)
+// will install the new binary and start the new process.
+func (st *State) initiateUpdate(which Which, dr downloadResult, respWriter http.ResponseWriter, redirect bool) error {
 	slog.Info("installing update",
 		"which", which,
 		"tmpname", dr.tmpName,
 		"versionpath", dr.versionPath,
-		"origbinpath", dr.origBinPathAbs,
 		"path", dr.destPath,
 		"origversion", dr.originfo.Main.Version,
 		"origgoversion", dr.originfo.GoVersion,
 		"newversion", dr.newinfo.Main.Version,
-		"newgoversion", dr.newinfo.GoVersion,
-		"manual", manual)
-
-	if manual {
-		scheduledCancel(which)
-	} else {
-		schedule.Lock()
-		schedule.backoff = 0
-		schedule.Unlock()
-	}
-
-	if _, err := os.Stat(dr.versionPath); err == nil {
-		if isOldBinary(which, dr.versionPath) {
-			if err := os.Remove(dr.versionPath); err != nil {
-				return fmt.Errorf("target version path %s already existed, was previously installed, removing failed: %v", dr.versionPath, err)
-			}
-		} else {
-			return fmt.Errorf("target version path %s already exists", dr.versionPath)
-		}
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("stat target version path %s: %v", dr.versionPath, err)
-	}
+		"newgoversion", dr.newinfo.GoVersion)
 
 	if err := os.Rename(dr.tmpName, dr.versionPath); err != nil {
 		return fmt.Errorf("rename temp file to version path %s: %v", dr.versionPath, err)
 	}
 
-	prevPathAbs, err := installBinary(dr.versionPath, dr.destPath, dr.originfo)
-	if err != nil {
-		return err
-	}
-	dr.versionPath = ""
-
 	if which == Self {
-		// Exec ourselves. We remove any pause.txt when we are back online again.
+		// Exec ourselves.
 
-		oldBinaries.Lock()
-		oldBinaries.Self = updateBinariesTxt(oldBinaries.Self, "old-binaries-self.txt", prevPathAbs, dr.origBinPathAbs)
-		oldBinaries.Unlock()
+		prevPathAbs, err := st.installBinary(dr.versionPath, dr.destPath, dr.originfo)
+		if err != nil {
+			return err
+		}
+		dr.versionPath = ""
 
 		// We are either successful and don't return, or return an error.
-		updating.Lock()
-		defer updating.Unlock()
-		err := execSelf(false, respWriter, redirect)
+		if st.PreviousBinarySelf != "" && st.PreviousBinarySelf != prevPathAbs && !isCurrentBinary(os.Args[0], st.PreviousBinarySelf) {
+			slog.Info("removing previous self binary", "path", st.PreviousBinarySelf)
+			if err := os.Remove(st.PreviousBinarySelf); err != nil {
+				slog.Warn("removing previous binary", "err", err, "path", st.PreviousBinarySelf)
+			}
+		}
+		st.PreviousBinarySelf = prevPathAbs
+		st.write()
+		err = st.execSelf(false, respWriter, redirect)
 		return err
 	}
 
-	// todo: first terminate, then replace binary and start again?
-
-	// Remove any pause.txt file that would prevent future automatic updates.
-	os.Remove(filepath.Join(cacheDir, "pause.txt"))
-	metricUpdatesPaused.Set(0)
-
-	updating.Lock()
-	updating.pauseReason = ""
-	updating.svcinfoPrev = updating.svcinfo
-	updating.binaryPathPrevAbs = prevPathAbs
-	updating.svcinfo = dr.newinfo
-	metricSvcVersion.Reset()
-	metricSvcGoVersion.Reset()
-	metricSvcVersion.WithLabelValues(updating.svcinfo.Main.Version).Set(1)
-	metricSvcGoVersion.WithLabelValues(updating.svcinfo.GoVersion).Set(1)
-	p := updating.process
-	updating.Unlock()
-
-	oldBinaries.Lock()
-	oldBinaries.Svc = updateBinariesTxt(oldBinaries.Svc, "old-binaries-svc.txt", prevPathAbs, dr.origBinPathAbs)
-	oldBinaries.Unlock()
+	st.svcNext = &dr
 
 	// todo: should we send signal to progress group instead of just process?
-	if err := p.Signal(syscall.SIGTERM); err != nil {
+	if err := st.process.Signal(syscall.SIGTERM); err != nil {
 		return fmt.Errorf("sending signal to command for restart to update: %v", err)
 	}
 	return nil
 }
 
-// must be called with updating lock held.
-func execSelf(isConfigChange bool, respWriter http.ResponseWriter, redirect bool) error {
-	p := updating.process
-	started := updating.started
-	selfinfo := updating.selfinfo
+func (st *State) execSelf(isConfigChange bool, respWriter http.ResponseWriter, redirect bool) error {
+	p := st.process
+	started := st.processStarted
+	selfinfo := st.selfinfo
 	es := execState{p.Pid, started, isConfigChange, selfinfo.Main.Version, selfinfo.GoVersion, 0, redirect}
 
 	if respWriter != nil {
@@ -1406,99 +1433,12 @@ func execSelf(isConfigChange bool, respWriter http.ResponseWriter, redirect bool
 	return nil
 }
 
-// must be called without oldBinaries locked.
-func isOldBinary(which Which, path string) bool {
-	oldBinaries.Lock()
-	defer oldBinaries.Unlock()
-	var l []string
-	if which == Self {
-		l = oldBinaries.Self
-	} else {
-		l = oldBinaries.Svc
-	}
-	return slices.Contains(l, path)
-}
-
-// must be called with oldBinaries locked.
-// old is the current contents of the "old files" text file, at txtPath, which
-// we'll rewrite. prevBinPathAbs is the path we want to add to that file, for
-// future removal. newBinPathAbs is the new binary, we won't clean it up and won't
-// add it to the txt file (that will happen with the next update).
-func updateBinariesTxt(old []string, txtName, prevBinPathAbs, newBinPathAbs string) (newOld []string) {
-	txtPath := filepath.Join(cacheDir, txtName)
-	slog.Debug("maintenance for old binaries", "txtpath", txtPath, "prevbinpath", prevBinPathAbs, "newbinpath", newBinPathAbs)
-	old = removeOldBinaries(old, newBinPathAbs)
-	if prevBinPathAbs != newBinPathAbs {
-		old = append(old, prevBinPathAbs)
-	}
-	data := []byte(strings.Join(old, "\n") + "\n")
-	if err := os.WriteFile(txtPath, data, 0600); err != nil {
-		slog.Warn("writing binaries text file for future cleanup", "err", err, "txtpath", txtPath)
-	}
-	return old
-}
-
-func listOldBinaries(txtPath string) ([]string, error) {
-	data, err := os.ReadFile(filepath.Join(cacheDir, txtPath))
-	if err != nil && errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	return strings.Split(strings.TrimRight(string(data), "\n"), "\n"), nil
-}
-
-func removeOldBinary(p, newBinPathAbs string) (removed bool) {
-	p, err := filepath.Abs(p)
-	if err != nil {
-		slog.Warn("evaluating old binary path to absolute path", "err", err, "oldpath", p)
-		return false
-	}
-	if p == newBinPathAbs {
-		slog.Warn("not removing old binary that is same as new binary", "path", p)
-		return false
-	}
-	if isSymlinkDest(p, cmdArgs[0]) || isSymlinkDest(p, os.Args[0]) {
-		slog.Warn("not removing old binary that is currently a symlink target", "oldpath", p)
-		return false
-	}
-
-	if err := os.Remove(p); err != nil {
-		slog.Error("removing old binary", "path", p, "err", err)
-		return false
-	}
-	slog.Info("old binary removed", "path", p)
-	return true
-}
-
-// removeOldBinaries removes paths from l, skipping those that are equal to
-// newBinPathAbs, or where the current ysco or service binary is a symlink to a
-// path.
-func removeOldBinaries(l []string, newBinPathAbs string) (nl []string) {
-	for _, p := range l {
-		if ok := removeOldBinary(p, newBinPathAbs); !ok {
-			nl = append(nl, p)
-		}
-	}
-	return nl
-}
-
-func isSymlinkDest(pathAbs, link string) bool {
-	s, err := os.Readlink(link)
-	if err != nil {
-		return false
-	}
-	s, err = filepath.Abs(s)
-	if err != nil {
-		return false
-	}
-	return s == pathAbs
-}
-
 // installBinary ensures the file at binPath is available at dstPath. Both files
 // are in the same directory.
 // If dstPath is currently a symlink, it is replaced with a symlink to binPath.
 // Otherwise binPath is renamed to dstPath.
 // The previous path is returned, it is always absolute.
-func installBinary(binPath string, dstPath string, info *debug.BuildInfo) (prevPathAbs string, rerr error) {
+func (st *State) installBinary(binPath string, dstPath string, curInfo debug.BuildInfo) (prevPathAbs string, rerr error) {
 	if fi, err := os.Lstat(dstPath); err != nil {
 		return "", fmt.Errorf("lstat %s: %v", dstPath, err)
 	} else if fi.Mode()&fs.ModeSymlink == 0 {
@@ -1508,7 +1448,7 @@ func installBinary(binPath string, dstPath string, info *debug.BuildInfo) (prevP
 		if runtime.GOOS == "windows" {
 			suffix += ".exe"
 		}
-		prevName := fmt.Sprintf("%s-%s-%s%s", path.Base(info.Main.Path), info.Main.Version, info.GoVersion, suffix)
+		prevName := fmt.Sprintf("%s-%s-%s%s", filepath.Base(curInfo.Path), curInfo.Main.Version, curInfo.GoVersion, suffix)
 		prevPathAbs = filepath.Join(filepath.Dir(binPath), prevName)
 		prevPathAbs, err = filepath.Abs(prevPathAbs)
 		if err != nil {
@@ -1556,20 +1496,19 @@ func installBinary(binPath string, dstPath string, info *debug.BuildInfo) (prevP
 	return prevPathAbs, nil
 }
 
-// called with "updating" lock held.
-func updateRollback() error {
-	slog.Warn("attempting to rollback to previous binary", "prevbinary", updating.binaryPathPrevAbs, "prevversion", updating.svcinfoPrev.Main.Version, "prevgoversion", updating.svcinfoPrev.GoVersion)
+func (st *State) rollbackBinary() error {
+	slog.Warn("attempting to rollback to previous binary", "prevbinary", st.PreviousBinarySvc, "prevversion", st.svcinfoPrev.Main.Version, "prevgoversion", st.svcinfoPrev.GoVersion)
 
-	if _, err := installBinary(updating.binaryPathPrevAbs, cmdArgs[0], updating.svcinfo); err != nil {
+	if _, err := st.installBinary(st.PreviousBinarySvc, cmdArgs[0], st.svcinfo); err != nil {
 		return fmt.Errorf("restoring previous binary again: %v", err)
 	}
 
-	updating.svcinfo = updating.svcinfoPrev
-	updating.svcinfoPrev = nil
+	st.svcinfo = *st.svcinfoPrev
+	st.svcinfoPrev = nil
 	metricSvcVersion.Reset()
 	metricSvcGoVersion.Reset()
-	metricSvcVersion.WithLabelValues(updating.svcinfo.Main.Version).Set(1)
-	metricSvcGoVersion.WithLabelValues(updating.svcinfo.GoVersion).Set(1)
-	updating.binaryPathPrevAbs = ""
+	metricSvcVersion.WithLabelValues(st.svcinfo.Main.Version).Set(1)
+	metricSvcGoVersion.WithLabelValues(st.svcinfo.GoVersion).Set(1)
+	st.PreviousBinarySvc = ""
 	return nil
 }
