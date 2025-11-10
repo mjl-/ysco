@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"slices"
 	"strings"
@@ -388,6 +389,39 @@ func handleIndexPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Redirect(w, r, ".", http.StatusSeeOther)
+}
+
+// For GET /service-version, returning the service version as a line of plain text.
+// Can be useful to expose publicly.
+func handleServiceVersion(w http.ResponseWriter, r *http.Request) {
+	// note: No authentication.
+
+	state.Lock()
+	info := state.svcinfo
+	state.Unlock()
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	fmt.Fprintf(w, "%s %s %s %s %s\n", info.Main.Path, info.Main.Version, info.GoVersion, runtime.GOOS, runtime.GOARCH)
+}
+
+// For GET /service-version.json, a machine-readable variant.
+func handleServiceVersionJSON(w http.ResponseWriter, r *http.Request) {
+	// note: No authentication.
+
+	state.Lock()
+	info := state.svcinfo
+	state.Unlock()
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "\t")
+	enc.Encode(map[string]string{
+		"module":    info.Main.Path,
+		"version":   info.Main.Version,
+		"goversion": info.GoVersion,
+		"os":        runtime.GOOS,
+		"arch":      runtime.GOARCH,
+	})
 }
 
 func handleNotify(w http.ResponseWriter, r *http.Request) {

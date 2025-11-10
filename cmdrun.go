@@ -461,6 +461,8 @@ func cmdRun(args []string) {
 	adminHandler.HandleFunc("POST /notify", handleNotify)
 	adminHandler.HandleFunc("POST /notifytoolchain", handleNotifyToolchain)
 	adminHandler.HandleFunc("POST /update", handleUpdate)
+	adminHandler.HandleFunc("GET /service-version", handleServiceVersion)
+	adminHandler.HandleFunc("GET /service-version.json", handleServiceVersionJSON)
 
 	metricsHandler.Handle("GET /metrics", promhttp.Handler())
 
