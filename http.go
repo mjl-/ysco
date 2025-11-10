@@ -401,7 +401,7 @@ func handleServiceVersion(w http.ResponseWriter, r *http.Request) {
 	state.Unlock()
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	fmt.Fprintf(w, "%s %s %s %s %s\n", info.Main.Path, info.Main.Version, info.GoVersion, runtime.GOOS, runtime.GOARCH)
+	fmt.Fprintf(w, "%s %s %s %s %s\n", info.Path, info.Main.Version, info.GoVersion, runtime.GOOS, runtime.GOARCH)
 }
 
 // For GET /service-version.json, a machine-readable variant.
@@ -417,6 +417,7 @@ func handleServiceVersionJSON(w http.ResponseWriter, r *http.Request) {
 	enc.SetIndent("", "\t")
 	enc.Encode(map[string]string{
 		"module":    info.Main.Path,
+		"package":   info.Path,
 		"version":   info.Main.Version,
 		"goversion": info.GoVersion,
 		"os":        runtime.GOOS,
