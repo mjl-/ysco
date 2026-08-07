@@ -1086,6 +1086,7 @@ func policyPickVersion(log *slog.Logger, pol VersionPolicy, poltc GoVersionPolic
 	case GoVersionPatch, GoVersionSupported, GoVersionFollow:
 		t := strings.Split(ngovers, ".")
 		if len(t) != 3 {
+			// Also applies to release candidates, e.g. go1.27rc2
 			log.Error("unrecognized goversion, sticking to current", "goversion", ngovers)
 			ngovers = curgovers
 		} else {
