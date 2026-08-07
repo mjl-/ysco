@@ -24,10 +24,10 @@ func cmdInit(args []string) {
 		log.Fatalf("checking directory ys: %v", err)
 	}
 
-	// Find module path and latest version.
-	pkgPath := args[0]
+	pkgPath, modVersion, haveVersion := strings.Cut(args[0], "@")
 	modPath := pkgPath
-	var modVersion string
+
+	// Find module path and latest version.
 	for {
 		versions, err := lookupModuleVersions(slog.Default(), modPath)
 		if err != nil {
@@ -39,7 +39,9 @@ func cmdInit(args []string) {
 			modPath = strings.Join(t[:len(t)-1], "/")
 			continue
 		}
-		if len(versions) == 0 {
+		if haveVersion {
+			break
+		} else if len(versions) == 0 {
 			log.Fatalf("no stable version yet for module %q", modPath)
 		}
 		modVersion = versions[0].Full

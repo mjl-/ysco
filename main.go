@@ -47,7 +47,7 @@ func main() {
 
 	flag.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: ysco run [flags] ...")
-		fmt.Fprintln(os.Stderr, "       ysco init vcshub.example/mod/cmd/ex")
+		fmt.Fprintln(os.Stderr, "       ysco init vcshub.example/mod/cmd/ex[@version]")
 		fmt.Fprintln(os.Stderr, "       ysco config >example.conf")
 		fmt.Fprintln(os.Stderr, "       ysco configdefaults >defaults.conf")
 		fmt.Fprintln(os.Stderr, "       ysco testconfig < ys/ysco.conf")
