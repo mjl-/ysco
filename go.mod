@@ -1,12 +1,12 @@
 module github.com/mjl-/ysco
 
-go 1.23.0
+go 1.25.0
 
 require (
 	github.com/mjl-/sconf v0.0.8
 	github.com/prometheus/client_golang v1.20.4
-	golang.org/x/mod v0.24.0
-	golang.org/x/sys v0.33.0
+	golang.org/x/mod v0.40.0
+	golang.org/x/sys v0.47.0
 )
 
 require (
