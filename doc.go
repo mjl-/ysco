@@ -142,7 +142,7 @@ minor versions are discovered.
 # Usage "ysco"
 
 	usage: ysco run [flags] ...
-	       ysco init vcshub.example/mod/cmd/ex
+	       ysco init vcshub.example/mod/cmd/ex[@version]
 	       ysco config >example.conf
 	       ysco configdefaults >defaults.conf
 	       ysco testconfig < ys/ysco.conf
