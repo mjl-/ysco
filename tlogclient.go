@@ -157,11 +157,15 @@ func (c *clientOps) ReadCache(file string) ([]byte, error) {
 func (c *clientOps) WriteCache(file string, data []byte) {
 	// log.Printf("client: WriteCache %s", file)
 
+	// We don't cache lookups, only tiles.
+	if strings.Contains(file, "lookup") {
+		return
+	}
+
 	p := filepath.Join(c.localDir, "cache", file)
 	os.MkdirAll(filepath.Dir(p), 0777)
 	if err := os.WriteFile(p, data, 0666); err != nil {
-		// todo: should be able to return errors
-		panic(fmt.Sprintf("write failed: %v", err))
+		slog.Error("writefile for cache failed", "err", err)
 	}
 }
 
