@@ -641,6 +641,10 @@ func cmdRun(args []string) {
 				// After 5 seconds, mark as no longer updating and reschedule for possible next
 				// update.
 				go func() {
+					if err := monitorOne(); err != nil {
+						slog.Error("refreshing whether updates are available after update", "err", err)
+					}
+
 					time.Sleep(5 * time.Second)
 					slog.Debug("clearing busy after 5s")
 					state.Lock()
