@@ -100,6 +100,10 @@ type indexArgs struct {
 	ConfigContents    string
 	ConfigExample     string
 	Links             []Link
+	GOOS              string
+	GOARCH            string
+	Hostname          string
+	WorkDir           string
 }
 
 func gatherIndexArgs() (indexArgs, error) {
@@ -170,6 +174,16 @@ func gatherIndexArgs() (indexArgs, error) {
 	}
 	configDefaults := b.String()
 
+	hostname, err := os.Hostname()
+	if err != nil {
+		return indexArgs{}, fmt.Errorf("get hostname: %v", err)
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		return indexArgs{}, fmt.Errorf("get workdir: %v", err)
+	}
+
 	return indexArgs{
 		svcinfo.Main.Path,
 		packageDir(svcinfo),
@@ -195,6 +209,10 @@ func gatherIndexArgs() (indexArgs, error) {
 		string(configContents),
 		configDefaults,
 		config.Links,
+		runtime.GOOS,
+		runtime.GOARCH,
+		hostname,
+		wd,
 	}, nil
 }
 

@@ -5,7 +5,7 @@
 		<title>Ysco - {{ .SvcModPath }} {{ .SvcPkgDir }} {{ .SvcVersion }} {{ .SvcGoVersion }}</title>
 		<style>
 * { font-family: "Ubuntu", sans-serif; margin: 0; padding: 0; font-size: 1em; }
-pre { font-family: "Ubuntu Mono", monospace; }
+pre, pre * { font-family: "Ubuntu Mono", monospace; }
 body { padding: 1em; }
 h1, h2, h3 { margin-top: 2ex; margin-bottom: 1ex; }
 h1 { font-size: 1.4em; }
@@ -16,9 +16,17 @@ p { margin-bottom: 1ex; }
 th, td { padding: .2em .1em; }
 [title] { text-decoration-style: dotted; }
 fieldset { border: 0; }
+.light { color: #666; }
 		</style>
 	</head>
 	<body>
+		<pre>
+<span class="light">hostname</span> {{ .Hostname }}
+<span class="light">os/arch</span>  {{ .GOOS }}/{{ .GOARCH }}
+<span class="light">work dir</span> {{ .WorkDir }}
+
+</pre>
+
 		<h1 style="margin-top: 0">Ysco - Managed automated updates</h1>
 
 {{ $updateBusy := .UpdateBusy }}
